@@ -61,7 +61,7 @@ export const register = async (req, res) => {
       if (preferredMethod === 'phone') {
         await sendOTP(phone, code);
       } else {
-        await sendEmailOTP(email, code, name);
+        //await sendEmailOTP(email, code, name);
       }
     } catch (error) {
       console.error('Failed to send verification code:', error.message);
