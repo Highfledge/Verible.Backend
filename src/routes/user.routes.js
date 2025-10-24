@@ -2,9 +2,11 @@ import express from 'express';
 import { body } from 'express-validator';
 import {
   updateProfile,
-  deleteAccount
+  deleteAccount,
+  getMyFeedback,
+  getMyInteractions
 } from '../controllers/user.controller.js';
-import { isAuthenticated } from '../middleware/auth.middleware.js';
+import { isAuthenticated, isActive } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -16,6 +18,7 @@ const router = express.Router();
 router.put(
   '/profile',
   isAuthenticated,
+  isActive,
   [
     body('name')
       .optional()
@@ -44,7 +47,21 @@ router.put(
  * @desc    Delete own account
  * @access  Private
  */
-router.delete('/account', isAuthenticated, deleteAccount);
+router.delete('/account', isAuthenticated, isActive, deleteAccount);
+
+/**
+ * @route   GET /api/users/my-feedback
+ * @desc    Get user's feedback history
+ * @access  Private
+ */
+router.get('/my-feedback', isAuthenticated, isActive, getMyFeedback);
+
+/**
+ * @route   GET /api/users/my-interactions
+ * @desc    Get user's interactions with sellers
+ * @access  Private
+ */
+router.get('/my-interactions', isAuthenticated, isActive, getMyInteractions);
 
 export default router;
 

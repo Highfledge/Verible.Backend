@@ -184,6 +184,21 @@ const listingSchema = new mongoose.Schema(
       isVerified: {
         type: Boolean,
         default: false
+      },
+      adminReview: {
+        reviewedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User'
+        },
+        reviewedAt: Date,
+        action: {
+          type: String,
+          enum: ['dismissed', 'upheld', 'pending']
+        },
+        adminNotes: {
+          type: String,
+          maxlength: [500, 'Admin notes cannot exceed 500 characters']
+        }
       }
     }]
   },

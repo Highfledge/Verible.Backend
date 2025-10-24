@@ -8,7 +8,8 @@ const sellerSchema = new mongoose.Schema(
       ref: 'User',
       required: false, // Optional for extracted profiles
       unique: true,
-      sparse: true // Allows multiple null values
+      sparse: true, // Allows multiple null values
+      default: null
     },
     
     // Seller identification across platforms
@@ -123,6 +124,10 @@ const sellerSchema = new mongoose.Schema(
         action: {
           type: String,
           enum: ['dismissed', 'upheld', 'pending']
+        },
+        adminNotes: {
+          type: String,
+          maxlength: [500, 'Admin notes cannot exceed 500 characters']
         }
       }
     }],
@@ -211,21 +216,26 @@ sellerSchema.index({ verificationStatus: 1 });
 
 // Virtual for total flags count
 sellerSchema.virtual('totalFlags').get(function() {
-  return this.flags.length;
+  return this.flags ? this.flags.length : 0;
 });
 
 // Virtual for total endorsements count
 sellerSchema.virtual('totalEndorsements').get(function() {
-  return this.endorsements.length;
+  return this.endorsements ? this.endorsements.length : 0;
 });
 
 // Virtual for net feedback score
 sellerSchema.virtual('netFeedbackScore').get(function() {
-  return this.endorsements.length - this.flags.length;
+  const flagsCount = this.flags ? this.flags.length : 0;
+  const endorsementsCount = this.endorsements ? this.endorsements.length : 0;
+  return endorsementsCount - flagsCount;
 });
 
 // Method to add a flag
 sellerSchema.methods.addFlag = function(userId, reason) {
+  if (!this.flags) {
+    this.flags = [];
+  }
   this.flags.push({
     userId,
     reason,
@@ -236,6 +246,9 @@ sellerSchema.methods.addFlag = function(userId, reason) {
 
 // Method to add an endorsement
 sellerSchema.methods.addEndorsement = function(userId, reason) {
+  if (!this.endorsements) {
+    this.endorsements = [];
+  }
   this.endorsements.push({
     userId,
     reason,
@@ -280,7 +293,9 @@ sellerSchema.methods.verifySeller = function(verificationStatus) {
 // Method to check if user can flag/endorse this seller
 sellerSchema.methods.canUserInteract = function(userId) {
   // Users can't flag/endorse themselves
-  return this.userId.toString() !== userId.toString();
+  // If seller has no userId (extracted profile), user can interact
+  // If seller has userId, user can interact only if it's not their own
+  return !this.userId || this.userId.toString() !== userId.toString();
 };
 
 // Static method to find seller by platform and sellerId

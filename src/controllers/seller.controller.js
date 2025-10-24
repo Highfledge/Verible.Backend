@@ -163,57 +163,6 @@ export const getMySellerProfile = async (req, res) => {
 };
 
 /**
- * Update seller profile
- * PUT /api/sellers/profile
- */
-export const updateSellerProfile = async (req, res) => {
-  try {
-    // Validate request
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
-    const { profileData } = req.body;
-    const userId = req.user._id;
-
-    const seller = await Seller.findOne({ userId });
-    if (!seller) {
-      return res.status(404).json({
-        success: false,
-        message: 'Seller profile not found'
-      });
-    }
-
-    // Update profile data
-    if (profileData) {
-      seller.profileData = { ...seller.profileData, ...profileData };
-    }
-
-    await seller.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Seller profile updated successfully',
-      data: {
-        seller: seller.toJSON()
-      }
-    });
-  } catch (error) {
-    console.error('Update seller profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update seller profile',
-      error: error.message
-    });
-  }
-};
-
-/**
  * Lookup seller by URL or name
  * GET /api/sellers/lookup
  */
@@ -313,7 +262,7 @@ export const getSellerScore = async (req, res) => {
     const { id } = req.params;
 
     const seller = await Seller.findById(id)
-      .select('pulseScore confidenceLevel lastScored verificationStatus totalFlags totalEndorsements netFeedbackScore');
+      .select('pulseScore confidenceLevel lastScored verificationStatus flags endorsements');
 
     if (!seller) {
       return res.status(404).json({
@@ -431,17 +380,28 @@ export const getTopSellers = async (req, res) => {
       query.platform = platform;
     }
 
+    // Get total count for debugging
+    const totalSellers = await Seller.countDocuments(query);
+    console.log(`Total active sellers: ${totalSellers}`);
+
     const sellers = await Seller.find(query)
       .sort({ pulseScore: -1, lastScored: -1 })
       .limit(parseInt(limit))
       .populate('userId', 'name email role verified')
       .select('-flags -endorsements -scoringFactors');
 
+    console.log(`Found ${sellers.length} sellers for top sellers query`);
+    console.log('Query:', query);
+    console.log('Limit:', limit);
+
     res.status(200).json({
       success: true,
       data: {
         sellers: sellers.map(seller => seller.toJSON()),
-        count: sellers.length
+        count: sellers.length,
+        total: totalSellers,
+        query: query,
+        limit: parseInt(limit)
       }
     });
   } catch (error) {
@@ -490,6 +450,575 @@ export const deleteSellerAccount = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to delete seller account',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Flag a seller
+ * POST /api/sellers/:id/flag
+ */
+export const flagSeller = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user._id;
+
+    const seller = await Seller.findById(id);
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    // Check if user can interact with this seller
+    if (!seller.canUserInteract(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot flag your own seller profile'
+      });
+    }
+
+    // Check if user already flagged this seller
+    const existingFlag = seller.flags.find(flag => flag.userId.toString() === userId.toString());
+    if (existingFlag) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already flagged this seller'
+      });
+    }
+
+    await seller.addFlag(userId, reason);
+
+    // Recalculate pulse score after adding flag
+    const updatedSeller = await Seller.findById(id);
+    const newPulseScore = Math.max(0, updatedSeller.pulseScore - 5); // Reduce score by 5 points
+    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    
+    updatedSeller.pulseScore = newPulseScore;
+    updatedSeller.confidenceLevel = newConfidenceLevel;
+    updatedSeller.lastScored = new Date();
+    await updatedSeller.save();
+
+    // Refresh the seller to get updated virtual fields
+    const refreshedSeller = await Seller.findById(id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Seller flagged successfully',
+      data: {
+        newPulseScore,
+        newConfidenceLevel,
+        totalFlags: refreshedSeller.totalFlags,
+        netFeedbackScore: refreshedSeller.netFeedbackScore
+      }
+    });
+  } catch (error) {
+    console.error('Flag seller error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to flag seller',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Endorse a seller
+ * POST /api/sellers/:id/endorse
+ */
+export const endorseSeller = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user._id;
+
+    const seller = await Seller.findById(id);
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    // Check if user can interact with this seller
+    if (!seller.canUserInteract(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot endorse your own seller profile'
+      });
+    }
+
+    // Check if user already endorsed this seller
+    const existingEndorsement = seller.endorsements.find(endorsement => endorsement.userId.toString() === userId.toString());
+    if (existingEndorsement) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already endorsed this seller'
+      });
+    }
+
+    await seller.addEndorsement(userId, reason);
+
+    // Recalculate pulse score after adding endorsement
+    const updatedSeller = await Seller.findById(id);
+    const newPulseScore = Math.min(100, updatedSeller.pulseScore + 3); // Increase score by 3 points
+    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    
+    updatedSeller.pulseScore = newPulseScore;
+    updatedSeller.confidenceLevel = newConfidenceLevel;
+    updatedSeller.lastScored = new Date();
+    await updatedSeller.save();
+
+    // Refresh the seller to get updated virtual fields
+    const refreshedSeller = await Seller.findById(id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Seller endorsed successfully',
+      data: {
+        newPulseScore,
+        newConfidenceLevel,
+        totalEndorsements: refreshedSeller.totalEndorsements,
+        netFeedbackScore: refreshedSeller.netFeedbackScore
+      }
+    });
+  } catch (error) {
+    console.error('Endorse seller error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to endorse seller',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Remove flag from seller
+ * DELETE /api/sellers/:id/flag
+ */
+export const removeFlag = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const seller = await Seller.findById(id);
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    // Find and remove the flag
+    const flagIndex = seller.flags.findIndex(flag => flag.userId.toString() === userId.toString());
+    if (flagIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Flag not found'
+      });
+    }
+
+    seller.flags.splice(flagIndex, 1);
+    await seller.save();
+
+    // Recalculate pulse score after removing flag
+    const newPulseScore = Math.min(100, seller.pulseScore + 5); // Restore score by 5 points
+    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    
+    seller.pulseScore = newPulseScore;
+    seller.confidenceLevel = newConfidenceLevel;
+    seller.lastScored = new Date();
+    await seller.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Flag removed successfully',
+      data: {
+        newPulseScore,
+        newConfidenceLevel,
+        totalFlags: seller.totalFlags,
+        netFeedbackScore: seller.netFeedbackScore
+      }
+    });
+  } catch (error) {
+    console.error('Remove flag error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove flag',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Remove endorsement from seller
+ * DELETE /api/sellers/:id/endorse
+ */
+export const removeEndorsement = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const seller = await Seller.findById(id);
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    // Find and remove the endorsement
+    const endorsementIndex = seller.endorsements.findIndex(endorsement => endorsement.userId.toString() === userId.toString());
+    if (endorsementIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Endorsement not found'
+      });
+    }
+
+    seller.endorsements.splice(endorsementIndex, 1);
+    await seller.save();
+
+    // Recalculate pulse score after removing endorsement
+    const newPulseScore = Math.max(0, seller.pulseScore - 3); // Reduce score by 3 points
+    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    
+    seller.pulseScore = newPulseScore;
+    seller.confidenceLevel = newConfidenceLevel;
+    seller.lastScored = new Date();
+    await seller.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Endorsement removed successfully',
+      data: {
+        newPulseScore,
+        newConfidenceLevel,
+        totalEndorsements: seller.totalEndorsements,
+        netFeedbackScore: seller.netFeedbackScore
+      }
+    });
+  } catch (error) {
+    console.error('Remove endorsement error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove endorsement',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get seller feedback (flags and endorsements)
+ * GET /api/sellers/:id/feedback
+ */
+export const getSellerFeedback = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const seller = await Seller.findById(id)
+      .populate('flags.userId', 'name email')
+      .populate('endorsements.userId', 'name email')
+      .select('flags endorsements totalFlags totalEndorsements netFeedbackScore');
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        flags: seller.flags,
+        endorsements: seller.endorsements,
+        totalFlags: seller.totalFlags,
+        totalEndorsements: seller.totalEndorsements,
+        netFeedbackScore: seller.netFeedbackScore
+      }
+    });
+  } catch (error) {
+    console.error('Get seller feedback error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get seller feedback',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Search sellers
+ * GET /api/sellers/search
+ */
+export const searchSellers = async (req, res) => {
+  try {
+    const { name, platform, location, limit = 20, page = 1 } = req.query;
+
+    const query = { isActive: true };
+    
+    if (name) {
+      query['profileData.name'] = { $regex: name, $options: 'i' };
+    }
+    
+    if (platform) {
+      query.platform = platform;
+    }
+    
+    if (location) {
+      query['profileData.location'] = { $regex: location, $options: 'i' };
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const sellers = await Seller.find(query)
+      .populate('userId', 'name email role verified')
+      .select('-flags -endorsements -scoringFactors')
+      .sort({ pulseScore: -1, lastScored: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Seller.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        sellers: sellers.map(seller => seller.toJSON()),
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / parseInt(limit)),
+          totalSellers: total,
+          hasNext: skip + parseInt(limit) < total,
+          hasPrev: parseInt(page) > 1
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Search sellers error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search sellers',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all sellers (for debugging)
+ * GET /api/sellers/debug/all
+ */
+export const getAllSellersDebug = async (req, res) => {
+  try {
+    const { platform, limit = 50 } = req.query;
+
+    const query = {};
+    if (platform) {
+      query.platform = platform;
+    }
+
+    const sellers = await Seller.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .populate('userId', 'name email role verified')
+      .select('sellerId platform profileData.name pulseScore isActive isClaimed createdAt');
+
+    const stats = {
+      total: await Seller.countDocuments(),
+      active: await Seller.countDocuments({ isActive: true }),
+      claimed: await Seller.countDocuments({ isClaimed: true }),
+      extracted: await Seller.countDocuments({ userId: null }),
+      byPlatform: await Seller.aggregate([
+        { $group: { _id: '$platform', count: { $sum: 1 } } }
+      ])
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        sellers: sellers.map(seller => seller.toJSON()),
+        stats,
+        query,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all sellers debug error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get all sellers',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all sellers (for debugging)
+ * GET /api/sellers/all
+ */
+export const getAllSellers = async (req, res) => {
+  try {
+    const { limit = 100, platform, includeInactive = false } = req.query;
+
+    const query = {};
+    
+    if (!includeInactive) {
+      query.isActive = true;
+    }
+    
+    if (platform) {
+      query.platform = platform;
+    }
+
+    const sellers = await Seller.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .populate('userId', 'name email role verified')
+      .select('-flags -endorsements -scoringFactors');
+
+    const totalCount = await Seller.countDocuments(query);
+    const activeCount = await Seller.countDocuments({ isActive: true });
+    const inactiveCount = await Seller.countDocuments({ isActive: false });
+    const claimedCount = await Seller.countDocuments({ isClaimed: true });
+    const extractedCount = await Seller.countDocuments({ userId: null });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        sellers: sellers.map(seller => seller.toJSON()),
+        count: sellers.length,
+        total: totalCount,
+        stats: {
+          active: activeCount,
+          inactive: inactiveCount,
+          claimed: claimedCount,
+          extracted: extractedCount
+        },
+        query: query,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Get all sellers error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get all sellers',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get seller analytics
+ * GET /api/sellers/:id/analytics
+ */
+export const getSellerAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const seller = await Seller.findById(id)
+      .populate('listingHistory', 'title price category listingDate isActive')
+      .select('pulseScore confidenceLevel totalFlags totalEndorsements netFeedbackScore lastScored verificationStatus listingHistory');
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    // Calculate analytics
+    const totalListings = seller.listingHistory.length;
+    const activeListings = seller.listingHistory.filter(listing => listing.isActive).length;
+    const averagePrice = totalListings > 0 
+      ? seller.listingHistory.reduce((sum, listing) => sum + listing.price, 0) / totalListings 
+      : 0;
+
+    const analytics = {
+      seller: {
+        id: seller._id,
+        pulseScore: seller.pulseScore,
+        confidenceLevel: seller.confidenceLevel,
+        verificationStatus: seller.verificationStatus,
+        lastScored: seller.lastScored
+      },
+      feedback: {
+        totalFlags: seller.totalFlags,
+        totalEndorsements: seller.totalEndorsements,
+        netFeedbackScore: seller.netFeedbackScore
+      },
+      listings: {
+        total: totalListings,
+        active: activeListings,
+        inactive: totalListings - activeListings,
+        averagePrice: Math.round(averagePrice)
+      },
+      trustLevel: seller.pulseScore >= 80 ? 'High' : seller.pulseScore >= 60 ? 'Medium' : seller.pulseScore >= 40 ? 'Low' : 'Very Low'
+    };
+
+    res.status(200).json({
+      success: true,
+      data: analytics
+    });
+  } catch (error) {
+    console.error('Get seller analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get seller analytics',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Update seller profile
+ * PUT /api/sellers/profile
+ */
+export const updateSellerProfile = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { profileData } = req.body;
+    const userId = req.user._id;
+
+    const seller = await Seller.findOne({ userId });
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller profile not found'
+      });
+    }
+
+    // Update profile data
+    if (profileData) {
+      seller.profileData = { ...seller.profileData, ...profileData };
+    }
+
+    await seller.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Seller profile updated successfully',
+      data: {
+        seller: seller.toJSON()
+      }
+    });
+  } catch (error) {
+    console.error('Update seller profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update seller profile',
       error: error.message
     });
   }

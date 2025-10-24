@@ -30,7 +30,7 @@ export const extractAndScoreProfile = async (req, res) => {
       extractedData.recentListings || []
     );
 
-    // Check if seller already exists
+    // Check if seller already exists by profileUrl
     let seller = await Seller.findOne({ profileUrl });
     
     if (seller) {
@@ -42,20 +42,111 @@ export const extractAndScoreProfile = async (req, res) => {
       seller.scoringFactors = scoringResult.scoringFactors;
       await seller.save();
     } else {
-      // Create new seller record (no userId for extracted profiles)
-      seller = new Seller({
-        sellerId: `extracted-${Date.now()}`,
-        platform: extractedData.platform,
-        profileUrl,
-        profileData: extractedData.profileData,
-        pulseScore: scoringResult.pulseScore,
-        confidenceLevel: scoringResult.confidenceLevel,
-        lastScored: new Date(),
-        scoringFactors: scoringResult.scoringFactors,
-        isActive: true,
-        isClaimed: false // Not claimed by any user yet
+      // Try multiple strategies to create/update seller
+      let sellerCreated = false;
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      while (!sellerCreated && attempts < maxAttempts) {
+        try {
+          attempts++;
+          console.log(`Attempt ${attempts} to create seller...`);
+          
+          // Create new seller record (no userId for extracted profiles)
+          seller = new Seller({
+            userId: null, // Explicitly set to null for extracted profiles
+            sellerId: `extracted-${Date.now()}-${attempts}`,
+            platform: extractedData.platform,
+            profileUrl,
+            profileData: extractedData.profileData,
+            pulseScore: scoringResult.pulseScore,
+            confidenceLevel: scoringResult.confidenceLevel,
+            lastScored: new Date(),
+            scoringFactors: scoringResult.scoringFactors,
+            isActive: true,
+            isClaimed: false // Not claimed by any user yet
+          });
+          await seller.save();
+          sellerCreated = true;
+          console.log('Seller created successfully');
+        } catch (error) {
+          if (error.code === 11000) {
+            console.log(`Duplicate key error on attempt ${attempts}, trying different approach...`);
+            
+            // Try to find existing seller by profileUrl
+            seller = await Seller.findOne({ profileUrl });
+            if (seller) {
+              console.log('Found existing seller, updating...');
+              seller.profileData = extractedData.profileData;
+              seller.pulseScore = scoringResult.pulseScore;
+              seller.confidenceLevel = scoringResult.confidenceLevel;
+              seller.lastScored = new Date();
+              seller.scoringFactors = scoringResult.scoringFactors;
+              await seller.save();
+              sellerCreated = true;
+            } else if (attempts < maxAttempts) {
+              // Try with a different sellerId
+              console.log(`Trying with different sellerId on attempt ${attempts + 1}...`);
+              continue;
+            } else {
+              // Last attempt failed, try to find any seller with this profileUrl
+              console.log('All attempts failed, trying to find any existing seller...');
+              seller = await Seller.findOne({ 
+                $or: [
+                  { profileUrl },
+                  { 'profileData.name': extractedData.profileData.name },
+                  { platform: extractedData.platform, sellerId: { $regex: 'extracted-' } }
+                ]
+              });
+              
+              if (seller) {
+                console.log('Found similar seller, updating...');
+                seller.profileData = extractedData.profileData;
+                seller.pulseScore = scoringResult.pulseScore;
+                seller.confidenceLevel = scoringResult.confidenceLevel;
+                seller.lastScored = new Date();
+                seller.scoringFactors = scoringResult.scoringFactors;
+                await seller.save();
+                sellerCreated = true;
+              } else {
+                console.log('No existing seller found, creating with unique ID...');
+                // Create with a completely unique ID
+                seller = new Seller({
+                  userId: null,
+                  sellerId: `extracted-${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${attempts}`,
+                  platform: extractedData.platform,
+                  profileUrl,
+                  profileData: extractedData.profileData,
+                  pulseScore: scoringResult.pulseScore,
+                  confidenceLevel: scoringResult.confidenceLevel,
+                  lastScored: new Date(),
+                  scoringFactors: scoringResult.scoringFactors,
+                  isActive: true,
+                  isClaimed: false
+                });
+                await seller.save();
+                sellerCreated = true;
+              }
+            }
+          } else {
+            console.error('Non-duplicate error:', error);
+            throw error;
+          }
+        }
+      }
+
+      if (!sellerCreated) {
+        throw new Error('Failed to create or find seller after multiple attempts');
+      }
+    }
+
+    // Ensure seller exists before proceeding
+    if (!seller) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create or find seller record',
+        error: 'Seller record not found after processing'
       });
-      await seller.save();
     }
 
     res.status(200).json({

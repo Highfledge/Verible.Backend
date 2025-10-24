@@ -63,6 +63,10 @@ const userSchema = new mongoose.Schema(
     resetPasswordExpires: {
       type: Date,
       select: false
+    },
+    isActive: {
+      type: Boolean,
+      default: true
     }
   },
   {

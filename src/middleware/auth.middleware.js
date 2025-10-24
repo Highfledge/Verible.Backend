@@ -132,6 +132,28 @@ export const isVerified = (req, res, next) => {
 };
 
 /**
+ * Middleware to check if user account is active (not suspended)
+ * Must be used after isAuthenticated middleware
+ */
+export const isActive = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required'
+    });
+  }
+
+  if (req.user.isActive === false) {
+    return res.status(403).json({
+      success: false,
+      message: 'Account suspended. Please contact support.'
+    });
+  }
+
+  next();
+};
+
+/**
  * Optional authentication middleware
  * Doesn't fail if no token is provided, but validates if present
  * Useful for endpoints that support both authenticated and anonymous access
