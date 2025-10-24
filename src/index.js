@@ -4,6 +4,7 @@ import cors from 'cors';
 import connectDB from './config/database.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
+import sellerRoutes from './routes/seller.routes.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 
 // Load environment variables
@@ -53,6 +54,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/sellers', sellerRoutes);
 
 // Error handlers (must be last)
 app.use(notFound);
