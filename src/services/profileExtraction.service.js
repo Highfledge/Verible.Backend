@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import proxyService from './proxy.service.js';
 
 /**
  * Profile Extraction Service
@@ -54,7 +55,7 @@ class ProfileExtractionService {
    */
   async extractFacebookProfile(url) {
     try {
-      const response = await axios.get(url, {
+      const response = await proxyService.makeRequest(url, {
         headers: {
           'User-Agent': this.userAgent,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -105,7 +106,7 @@ class ProfileExtractionService {
     try {
       console.log('🔍 Starting Jiji extraction for:', url);
       
-      const response = await axios.get(url, {
+      const response = await proxyService.makeRequest(url, {
         headers: {
           'User-Agent': this.userAgent,
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -580,6 +581,57 @@ class ProfileExtractionService {
     if (!text) return 0;
     const match = text.match(/(\d+)%/);
     return match ? parseInt(match[1]) : 0;
+  }
+
+  /**
+   * Test proxy connectivity
+   * @param {string} testUrl - Optional test URL
+   * @returns {Promise<Object>} Test result
+   */
+  async testProxyConnection(testUrl = 'https://httpbin.org/ip') {
+    try {
+      console.log('🧪 Testing proxy connection...');
+      const result = await proxyService.testConnection(testUrl);
+      console.log('✅ Proxy test result:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Proxy test failed:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get proxy status and configuration
+   * @returns {Object} Proxy status information
+   */
+  getProxyStatus() {
+    return proxyService.getStatus();
+  }
+
+  /**
+   * Enable/disable proxy
+   * @param {boolean} enabled - Whether to enable proxy
+   */
+  setProxyEnabled(enabled) {
+    proxyService.setEnabled(enabled);
+    console.log(`🔧 Proxy ${enabled ? 'enabled' : 'disabled'} for profile extraction`);
+  }
+
+  /**
+   * Set proxy provider
+   * @param {string} provider - Provider name (scraperapi, brightdata, oxylabs, zyte)
+   */
+  setProxyProvider(provider) {
+    try {
+      proxyService.setProvider(provider);
+      console.log(`🔧 Proxy provider set to: ${provider} for profile extraction`);
+    } catch (error) {
+      console.error('❌ Failed to set proxy provider:', error.message);
+      throw error;
+    }
   }
 }
 
