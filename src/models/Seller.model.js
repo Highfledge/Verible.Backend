@@ -7,8 +7,6 @@ const sellerSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: false, // Optional for extracted profiles
-      unique: true,
-      sparse: true, // Allows multiple null values
       default: null
     },
     
@@ -32,7 +30,9 @@ const sellerSchema = new mongoose.Schema(
     profileUrl: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
+      trim: true,
+      unique: true
     },
     
     // Seller profile information (from platform)
@@ -209,7 +209,8 @@ const sellerSchema = new mongoose.Schema(
 
 // Indexes for performance
 sellerSchema.index({ sellerId: 1, platform: 1 });
-sellerSchema.index({ userId: 1 });
+sellerSchema.index({ userId: 1 }, { sparse: true }); // Sparse index for userId
+sellerSchema.index({ profileUrl: 1 }); // Index for profileUrl lookups
 sellerSchema.index({ pulseScore: -1 });
 sellerSchema.index({ lastScored: -1 });
 sellerSchema.index({ verificationStatus: 1 });
