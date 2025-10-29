@@ -6,7 +6,6 @@ import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import sellerRoutes from './routes/seller.routes.js';
 import adminRoutes from './routes/admin.routes.js';
-import proxyRoutes from './routes/proxy.routes.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 
 // Load environment variables
@@ -62,8 +61,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/sellers', sellerRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/proxy', proxyRoutes);
-
 // Error handlers (must be last)
 app.use(notFound);
 app.use(errorHandler);

@@ -1,6 +1,4 @@
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-import proxyService from './proxy.service.js';
+// Using Firecrawl API for web scraping
 
 /**
  * Profile Extraction Service
@@ -8,11 +6,12 @@ import proxyService from './proxy.service.js';
  */
 class ProfileExtractionService {
   constructor() {
-    this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+    this.firecrawlApiKey = 'process.env.FIRECRAWL_API_KEY';
+    this.firecrawlUrl = 'https://api.firecrawl.dev/v2/scrape';
   }
 
   /**
-   * Extract seller profile data from URL
+   * Extract seller profile data from URL using Firecrawl API
    * @param {string} url - The profile URL
    * @returns {Object} Extracted seller data
    */
@@ -20,16 +19,64 @@ class ProfileExtractionService {
     try {
       const platform = this.detectPlatform(url);
       
+      // Use Firecrawl API to scrape the page
+      const scrapedData = await this.scrapeWithFirecrawl(url);
+      
       if (platform === 'facebook') {
-        return await this.extractFacebookProfile(url);
+        return await this.extractFacebookProfile(scrapedData, url);
       } else if (platform === 'jiji') {
-        return await this.extractJijiProfile(url);
+        return await this.extractJijiProfile(scrapedData, url);
       } else {
         throw new Error('Unsupported platform');
       }
     } catch (error) {
       console.error('Profile extraction error:', error);
       throw new Error(`Failed to extract profile: ${error.message}`);
+    }
+  }
+
+  /**
+   * Scrape URL using Firecrawl API
+   * @param {string} url - The URL to scrape
+   * @returns {Object} Scraped data with markdown content
+   */
+  async scrapeWithFirecrawl(url) {
+    try {
+      const options = {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.firecrawlApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          "url": url,
+          "onlyMainContent": false,
+          "maxAge": 172800000,
+          "parsers": ["pdf"],
+          "formats": ["markdown"]
+        })
+      };
+
+      const response = await fetch(this.firecrawlUrl, options);
+      
+      if (!response.ok) {
+        throw new Error(`Firecrawl API error: ${response.status} ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        return {
+          markdown: data.data.markdown || '',
+          html: data.data.html || '',
+          metadata: data.data.metadata || {}
+        };
+      } else {
+        throw new Error('Firecrawl API returned unsuccessful response');
+      }
+    } catch (error) {
+      console.error('Firecrawl scraping error:', error);
+      throw new Error(`Failed to scrape URL with Firecrawl: ${error.message}`);
     }
   }
 
@@ -49,45 +96,35 @@ class ProfileExtractionService {
   }
 
   /**
-   * Extract Facebook Marketplace seller data
-   * @param {string} url 
+   * Extract Facebook Marketplace seller data from Firecrawl markdown
+   * @param {Object} scrapedData - Scraped data from Firecrawl
+   * @param {string} url - Original URL
    * @returns {Object} Facebook seller data
    */
-  async extractFacebookProfile(url) {
+  async extractFacebookProfile(scrapedData, url) {
     try {
-      const response = await proxyService.makeRequest(url, {
-        headers: {
-          'User-Agent': this.userAgent,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive',
-        },
-        timeout: 10000
-      });
-
-      const $ = cheerio.load(response.data);
+      const { markdown, metadata } = scrapedData;
       
-      // Extract seller information
+      // Extract seller information from markdown content
       const sellerData = {
         platform: 'facebook',
         profileUrl: url,
         profileData: {
-          name: this.extractFacebookName($),
-          profilePicture: this.extractFacebookProfilePicture($),
-          location: this.extractFacebookLocation($),
-          bio: this.extractFacebookBio($)
+          name: this.extractFacebookNameFromMarkdown(markdown),
+          profilePicture: this.extractFacebookProfilePictureFromMarkdown(markdown),
+          location: this.extractFacebookLocationFromMarkdown(markdown),
+          bio: this.extractFacebookBioFromMarkdown(markdown)
         },
         marketplaceData: {
-          accountAge: this.extractFacebookAccountAge($),
-          totalListings: this.extractFacebookTotalListings($),
-          avgRating: this.extractFacebookRating($),
-          totalReviews: this.extractFacebookReviews($),
-          responseRate: this.extractFacebookResponseRate($),
-          verificationStatus: this.extractFacebookVerification($)
+          accountAge: this.extractFacebookAccountAgeFromMarkdown(markdown),
+          totalListings: this.extractFacebookTotalListingsFromMarkdown(markdown),
+          avgRating: this.extractFacebookRatingFromMarkdown(markdown),
+          totalReviews: this.extractFacebookReviewsFromMarkdown(markdown),
+          responseRate: this.extractFacebookResponseRateFromMarkdown(markdown),
+          verificationStatus: this.extractFacebookVerificationFromMarkdown(markdown)
         },
-        recentListings: this.extractFacebookRecentListings($),
-        trustIndicators: this.extractFacebookTrustIndicators($)
+        recentListings: this.extractFacebookRecentListingsFromMarkdown(markdown),
+        trustIndicators: this.extractFacebookTrustIndicatorsFromMarkdown(markdown)
       };
 
       return sellerData;
@@ -98,69 +135,43 @@ class ProfileExtractionService {
   }
 
   /**
-   * Extract Jiji seller data
-   * @param {string} url 
+   * Extract Jiji seller data from Firecrawl markdown
+   * @param {Object} scrapedData - Scraped data from Firecrawl
+   * @param {string} url - Original URL
    * @returns {Object} Jiji seller data
    */
-  async extractJijiProfile(url) {
+  async extractJijiProfile(scrapedData, url) {
     try {
       console.log('🔍 Starting Jiji extraction for:', url);
       
-      const response = await proxyService.makeRequest(url, {
-        headers: {
-          'User-Agent': this.userAgent,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive',
-        },
-        timeout: 10000
-      });
-
-      console.log('📡 Jiji response status:', response.status);
-      console.log('📄 Jiji response length:', response.data.length);
-      console.log('🔍 Jiji response preview:', response.data.substring(0, 500));
+      const { markdown, metadata } = scrapedData;
       
-      // Debug: Check what classes and elements are available
-      const $ = cheerio.load(response.data);
-      console.log('🔍 Available classes with "user", "profile", "seller", "shop":');
-      $('[class*="user"], [class*="profile"], [class*="seller"], [class*="shop"]').each((i, el) => {
-        console.log(`  - Element ${i}:`, $(el).attr('class'), '| Text:', $(el).text().trim().substring(0, 50));
-      });
+      console.log('📄 Jiji markdown length:', markdown.length);
+      console.log('🔍 Jiji markdown preview:', markdown.substring(0, 500));
       
-      // Debug extraction
-      const name = this.extractJijiName($);
-      const profilePicture = this.extractJijiProfilePicture($);
-      const location = this.extractJijiLocation($);
-      const bio = this.extractJijiBio($);
-      
-      console.log('👤 Extracted name:', name);
-      console.log('🖼️ Extracted profile picture:', profilePicture);
-      console.log('📍 Extracted location:', location);
-      console.log('📝 Extracted bio:', bio);
-      
+      // Extract seller information from markdown content
       const sellerData = {
         platform: 'jiji',
         profileUrl: url,
         profileData: {
-          name,
-          profilePicture,
-          location,
-          bio
+          name: this.extractJijiNameFromMarkdown(markdown),
+          profilePicture: this.extractJijiProfilePictureFromMarkdown(markdown),
+          location: this.extractJijiLocationFromMarkdown(markdown),
+          bio: this.extractJijiBioFromMarkdown(markdown)
         },
         marketplaceData: {
-          accountAge: this.extractJijiAccountAge($),
-          totalListings: this.extractJijiTotalListings($),
-          avgRating: this.extractJijiRating($),
-          totalReviews: this.extractJijiReviews($),
-          responseRate: this.extractJijiResponseRate($),
-          verificationStatus: this.extractJijiVerification($),
-          lastSeen: this.extractJijiLastSeen($),
-          followers: this.extractJijiFollowers($),
-          categories: this.extractJijiCategories($)
+          accountAge: this.extractJijiAccountAgeFromMarkdown(markdown),
+          totalListings: this.extractJijiTotalListingsFromMarkdown(markdown),
+          avgRating: this.extractJijiRatingFromMarkdown(markdown),
+          totalReviews: this.extractJijiReviewsFromMarkdown(markdown),
+          responseRate: this.extractJijiResponseRateFromMarkdown(markdown),
+          verificationStatus: this.extractJijiVerificationFromMarkdown(markdown),
+          lastSeen: this.extractJijiLastSeenFromMarkdown(markdown),
+          followers: this.extractJijiFollowersFromMarkdown(markdown),
+          categories: this.extractJijiCategoriesFromMarkdown(markdown)
         },
-        recentListings: this.extractJijiRecentListings($),
-        trustIndicators: this.extractJijiTrustIndicators($)
+        recentListings: this.extractJijiRecentListingsFromMarkdown(markdown),
+        trustIndicators: this.extractJijiTrustIndicatorsFromMarkdown(markdown)
       };
       
       console.log('✅ Jiji extraction completed:', JSON.stringify(sellerData, null, 2));
@@ -172,383 +183,289 @@ class ProfileExtractionService {
     }
   }
 
-  // Facebook extraction methods
-  extractFacebookName($) {
-    return $('h1[data-testid="profile_name_in_profile_page"]').text().trim() ||
-           $('.x1heor9g').first().text().trim() ||
-           $('h1').first().text().trim() ||
-           'Unknown';
-  }
-
-  extractFacebookProfilePicture($) {
-    return $('img[data-testid="profile_picture"]').attr('src') ||
-           $('.x1heor9g img').first().attr('src') ||
-           null;
-  }
-
-  extractFacebookLocation($) {
-    return $('[data-testid="profile_location"]').text().trim() ||
-           $('.x1heor9g').eq(1).text().trim() ||
-           'Not specified';
-  }
-
-  extractFacebookBio($) {
-    return $('[data-testid="profile_bio"]').text().trim() ||
-           $('.x1heor9g').eq(2).text().trim() ||
-           '';
-  }
-
-  extractFacebookAccountAge($) {
-    const ageText = $('[data-testid="account_age"]').text() ||
-                    $('.x1heor9g').filter((i, el) => 
-                      $(el).text().includes('year') || $(el).text().includes('month')
-                    ).first().text();
+  // Facebook extraction methods from markdown
+  extractFacebookNameFromMarkdown(markdown) {
+    // Look for profile name patterns in markdown
+    const nameMatch = markdown.match(/#\s*([^#\n]+)/) || 
+                     markdown.match(/\*\*([^*]+)\*\*/) ||
+                     markdown.match(/^([^#\n]+)$/m);
     
-    return this.parseAccountAge(ageText);
+    return nameMatch ? nameMatch[1].trim() : 'Unknown';
   }
 
-  extractFacebookTotalListings($) {
-    const listingsText = $('[data-testid="total_listings"]').text() ||
-                        $('.x1heor9g').filter((i, el) => 
-                          $(el).text().includes('listing')
-                        ).first().text();
+  extractFacebookProfilePictureFromMarkdown(markdown) {
+    // Look for image URLs in markdown
+    const imageMatch = markdown.match(/!\[.*?\]\((https?:\/\/[^)]+\.(jpg|jpeg|png|gif|webp))/i);
+    return imageMatch ? imageMatch[1] : null;
+  }
+
+  extractFacebookLocationFromMarkdown(markdown) {
+    // Look for location patterns
+    const locationMatch = markdown.match(/(?:location|lives in|from)[:\s]+([^#\n]+)/i) ||
+                         markdown.match(/📍\s*([^#\n]+)/i);
     
-    return this.parseNumber(listingsText);
+    return locationMatch ? locationMatch[1].trim() : 'Not specified';
   }
 
-  extractFacebookRating($) {
-    const ratingText = $('[data-testid="avg_rating"]').text() ||
-                       $('.x1heor9g').filter((i, el) => 
-                         $(el).text().includes('rating')
-                       ).first().text();
+  extractFacebookBioFromMarkdown(markdown) {
+    // Look for bio/about section
+    const bioMatch = markdown.match(/(?:about|bio)[:\s]+([^#\n]+)/i) ||
+                    markdown.match(/📝\s*([^#\n]+)/i);
     
-    return this.parseRating(ratingText);
+    return bioMatch ? bioMatch[1].trim() : '';
   }
 
-  extractFacebookReviews($) {
-    const reviewsText = $('[data-testid="total_reviews"]').text() ||
-                        $('.x1heor9g').filter((i, el) => 
-                          $(el).text().includes('review')
-                        ).first().text();
+  extractFacebookAccountAgeFromMarkdown(markdown) {
+    // Look for account age patterns
+    const ageMatch = markdown.match(/(?:member since|joined|account age)[:\s]+([^#\n]+)/i) ||
+                    markdown.match(/(\d+)\s*(?:year|month)/i);
     
-    return this.parseNumber(reviewsText);
+    return this.parseAccountAge(ageMatch ? ageMatch[1] : '');
   }
 
-  extractFacebookResponseRate($) {
-    const responseText = $('[data-testid="response_rate"]').text() ||
-                         $('.x1heor9g').filter((i, el) => 
-                           $(el).text().includes('response')
-                         ).first().text();
+  extractFacebookTotalListingsFromMarkdown(markdown) {
+    // Look for listings count
+    const listingsMatch = markdown.match(/(?:listings|items|products)[:\s]+(\d+)/i) ||
+                         markdown.match(/(\d+)\s*(?:listings|items|products)/i);
     
-    return this.parsePercentage(responseText);
+    return this.parseNumber(listingsMatch ? listingsMatch[1] : '');
   }
 
-  extractFacebookVerification($) {
-    return $('[data-testid="verification_status"]').text().trim() ||
-           $('.x1heor9g').filter((i, el) => 
-             $(el).text().includes('verified')
-           ).first().text().trim() ||
-           'unverified';
+  extractFacebookRatingFromMarkdown(markdown) {
+    // Look for rating patterns
+    const ratingMatch = markdown.match(/(?:rating|stars)[:\s]+(\d+\.?\d*)/i) ||
+                       markdown.match(/(\d+\.?\d*)\s*(?:stars?|rating)/i);
+    
+    return this.parseRating(ratingMatch ? ratingMatch[1] : '');
   }
 
-  extractFacebookRecentListings($) {
+  extractFacebookReviewsFromMarkdown(markdown) {
+    // Look for reviews count
+    const reviewsMatch = markdown.match(/(?:reviews|feedback)[:\s]+(\d+)/i) ||
+                        markdown.match(/(\d+)\s*(?:reviews?|feedback)/i);
+    
+    return this.parseNumber(reviewsMatch ? reviewsMatch[1] : '');
+  }
+
+  extractFacebookResponseRateFromMarkdown(markdown) {
+    // Look for response rate
+    const responseMatch = markdown.match(/(?:response rate|response)[:\s]+(\d+)%/i) ||
+                         markdown.match(/(\d+)%\s*(?:response rate|response)/i);
+    
+    return this.parsePercentage(responseMatch ? responseMatch[1] : '');
+  }
+
+  extractFacebookVerificationFromMarkdown(markdown) {
+    // Look for verification status
+    if (markdown.match(/(?:verified|verification)/i)) {
+      return 'verified';
+    }
+    return 'unverified';
+  }
+
+  extractFacebookRecentListingsFromMarkdown(markdown) {
     const listings = [];
-    $('[data-testid="recent_listing"]').each((i, el) => {
-      const title = $(el).find('[data-testid="listing_title"]').text().trim();
-      const price = $(el).find('[data-testid="listing_price"]').text().trim();
-      const date = $(el).find('[data-testid="listing_date"]').text().trim();
-      
+    // Look for listing patterns in markdown
+    const listingMatches = markdown.match(/(?:title|item)[:\s]+([^#\n]+)/gi);
+    
+    if (listingMatches) {
+      listingMatches.slice(0, 5).forEach(match => {
+        const title = match.replace(/(?:title|item)[:\s]+/i, '').trim();
       if (title) {
-        listings.push({ title, price, date });
+          listings.push({ title, price: '', date: '' });
       }
     });
+    }
     
-    return listings.slice(0, 5); // Return last 5 listings
+    return listings;
   }
 
-  extractFacebookTrustIndicators($) {
+  extractFacebookTrustIndicatorsFromMarkdown(markdown) {
     return {
-      hasProfilePicture: !!this.extractFacebookProfilePicture($),
-      hasLocation: this.extractFacebookLocation($) !== 'Not specified',
-      hasBio: this.extractFacebookBio($).length > 0,
-      accountAge: this.extractFacebookAccountAge($),
-      totalReviews: this.extractFacebookReviews($),
-      avgRating: this.extractFacebookRating($),
-      verificationStatus: this.extractFacebookVerification($)
+      hasProfilePicture: !!this.extractFacebookProfilePictureFromMarkdown(markdown),
+      hasLocation: this.extractFacebookLocationFromMarkdown(markdown) !== 'Not specified',
+      hasBio: this.extractFacebookBioFromMarkdown(markdown).length > 0,
+      accountAge: this.extractFacebookAccountAgeFromMarkdown(markdown),
+      totalReviews: this.extractFacebookReviewsFromMarkdown(markdown),
+      avgRating: this.extractFacebookRatingFromMarkdown(markdown),
+      verificationStatus: this.extractFacebookVerificationFromMarkdown(markdown)
     };
   }
 
-  // Jiji extraction methods
-  extractJijiName($) {
-    // Try multiple selectors for Jiji
-    const title = $('title').text().trim();
-    const userName = $('.user-name').text().trim();
-    const h1Name = $('h1').first().text().trim();
-    const shopName = $('.shop-name').text().trim();
-    const sellerName = $('.seller-name').text().trim();
-    const profileName = $('.profile-name').text().trim();
-    
-    console.log('🔍 Looking for Jiji name...');
-    console.log('  - title found:', title);
-    console.log('  - .user-name found:', userName);
-    console.log('  - h1 found:', h1Name);
-    console.log('  - .shop-name found:', shopName);
-    console.log('  - .seller-name found:', sellerName);
-    console.log('  - .profile-name found:', profileName);
+  // Jiji extraction methods from markdown
+  extractJijiNameFromMarkdown(markdown) {
+    // Look for shop/seller name patterns in markdown
+    const titleMatch = markdown.match(/#\s*([^#\n]+)/) || 
+                      markdown.match(/\*\*([^*]+)\*\*/) ||
+                      markdown.match(/^([^#\n]+)$/m);
     
     // Extract name from title if it contains seller info
     let extractedName = 'Unknown';
-    if (title && title.includes('|')) {
-      extractedName = title.split('|')[0].trim();
+    if (titleMatch && titleMatch[1].includes('|')) {
+      extractedName = titleMatch[1].split('|')[0].trim();
+    } else if (titleMatch) {
+      extractedName = titleMatch[1].trim();
     }
     
-    return extractedName || userName || h1Name || shopName || sellerName || profileName || 'Unknown';
+    return extractedName;
   }
 
-  extractJijiProfilePicture($) {
-    // Try multiple selectors for Jiji profile picture
-    const avatarImg = $('.user-avatar img').attr('src');
-    const profileImg = $('.profile-picture img').attr('src');
-    const sellerPhoto = $('.b-seller-info-block__photo img').attr('src');
-    const sellerPhotoWrapper = $('.b-seller-info-block__photo-wrapper img').attr('src');
-    
-    console.log('🖼️ Looking for Jiji profile picture...');
-    console.log('  - .user-avatar img found:', avatarImg);
-    console.log('  - .profile-picture img found:', profileImg);
-    console.log('  - .b-seller-info-block__photo img found:', sellerPhoto);
-    console.log('  - .b-seller-info-block__photo-wrapper img found:', sellerPhotoWrapper);
-    
-    return avatarImg || profileImg || sellerPhoto || sellerPhotoWrapper || null;
+  extractJijiProfilePictureFromMarkdown(markdown) {
+    // Look for image URLs in markdown
+    const imageMatch = markdown.match(/!\[.*?\]\((https?:\/\/[^)]+\.(jpg|jpeg|png|gif|webp))/i);
+    return imageMatch ? imageMatch[1] : null;
   }
 
-  extractJijiLocation($) {
-    const userLocation = $('.user-location').text().trim();
-    const location = $('.location').text().trim();
-    const sellerLocation = $('.b-seller-info-block__location').text().trim();
-    const sellerDetails = $('.b-seller-info-block__details').text().trim();
+  extractJijiLocationFromMarkdown(markdown) {
+    // Look for location patterns
+    const locationMatch = markdown.match(/(?:location|address|lives in|from)[:\s]+([^#\n]+)/i) ||
+                         markdown.match(/📍\s*([^#\n]+)/i);
     
-    console.log('📍 Looking for Jiji location...');
-    console.log('  - .user-location found:', userLocation);
-    console.log('  - .location found:', location);
-    console.log('  - .b-seller-info-block__location found:', sellerLocation);
-    console.log('  - .b-seller-info-block__details found:', sellerDetails);
-    
-    return userLocation || location || sellerLocation || 'Not specified';
+    return locationMatch ? locationMatch[1].trim() : 'Not specified';
   }
 
-  extractJijiBio($) {
-    const userBio = $('.user-bio').text().trim();
-    const bio = $('.bio').text().trim();
-    const sellerBio = $('.b-seller-tile-info-block__text').text().trim();
-    const aboutSeller = $('.b-seller-sidebar-info-block__wrapper').text().trim();
+  extractJijiBioFromMarkdown(markdown) {
+    // Look for bio/about section
+    const bioMatch = markdown.match(/(?:about|bio|description)[:\s]+([^#\n]+)/i) ||
+                    markdown.match(/📝\s*([^#\n]+)/i);
     
-    console.log('📝 Looking for Jiji bio...');
-    console.log('  - .user-bio found:', userBio);
-    console.log('  - .bio found:', bio);
-    console.log('  - .b-seller-tile-info-block__text found:', sellerBio);
-    console.log('  - .b-seller-sidebar-info-block__wrapper found:', aboutSeller);
-    
-    return userBio || bio || sellerBio || aboutSeller || '';
+    return bioMatch ? bioMatch[1].trim() : '';
   }
 
-  extractJijiAccountAge($) {
-    const ageText = $('.account-age').text() ||
-                    $('.member-since').text() ||
-                    $('.b-advert-seller__label').text() ||
-                    $('.b-seller-info-tiles__item').text() ||
-                    $('.b-seller-info-block__details').text();
+  extractJijiAccountAgeFromMarkdown(markdown) {
+    // Look for account age patterns
+    const ageMatch = markdown.match(/(?:member since|joined|account age)[:\s]+([^#\n]+)/i) ||
+                    markdown.match(/(\d+)\+?\s*years?/i) ||
+                    markdown.match(/(\d+)\s*y\s*(\d+)\s*m/i);
     
-    console.log('📅 Looking for Jiji account age...');
-    console.log('  - .account-age found:', $('.account-age').text());
-    console.log('  - .member-since found:', $('.member-since').text());
-    console.log('  - .b-advert-seller__label found:', $('.b-advert-seller__label').text());
-    console.log('  - .b-seller-info-tiles__item found:', $('.b-seller-info-tiles__item').text());
-    console.log('  - .b-seller-info-block__details found:', $('.b-seller-info-block__details').text());
-    
-    // Look for "5+ years" or "5y 2m" patterns
-    const allText = $('body').text();
-    const yearMatch = allText.match(/(\d+)\+?\s*years?/i);
-    const monthMatch = allText.match(/(\d+)\s*y\s*(\d+)\s*m/i);
-    
-    console.log('🔍 Year pattern match:', yearMatch);
-    console.log('🔍 Month pattern match:', monthMatch);
-    
-    if (yearMatch) {
-      return parseInt(yearMatch[1]) * 12; // Convert years to months
-    }
-    if (monthMatch) {
-      return parseInt(monthMatch[1]) * 12 + parseInt(monthMatch[2]); // Years + months
+    if (ageMatch && ageMatch[1]) {
+      if (ageMatch[1].includes('year')) {
+        return parseInt(ageMatch[1]) * 12; // Convert years to months
+      }
+      if (ageMatch[2] && ageMatch[3]) {
+        return parseInt(ageMatch[2]) * 12 + parseInt(ageMatch[3]); // Years + months
+      }
     }
     
-    return this.parseAccountAge(ageText);
+    return this.parseAccountAge(ageMatch ? ageMatch[1] : '');
   }
 
-  extractJijiTotalListings($) {
-    const listingsText = $('.total-listings').text() ||
-                        $('.ads-count').text() ||
-                        $('.b-seller-top-categories__item-count').first().text() ||
-                        $('.b-seller-top-categories-list__item-count').first().text();
+  extractJijiTotalListingsFromMarkdown(markdown) {
+    // Look for listings count
+    const listingsMatch = markdown.match(/(?:listings|ads|items|products)[:\s]+(\d+)/i) ||
+                         markdown.match(/(\d+)\s*(?:listings|ads|items|products)/i);
     
-    console.log('📊 Looking for Jiji total listings...');
-    console.log('  - .total-listings found:', $('.total-listings').text());
-    console.log('  - .ads-count found:', $('.ads-count').text());
-    console.log('  - .b-seller-top-categories__item-count found:', $('.b-seller-top-categories__item-count').first().text());
-    console.log('  - .b-seller-top-categories-list__item-count found:', $('.b-seller-top-categories-list__item-count').first().text());
-    
-    return this.parseNumber(listingsText);
+    return this.parseNumber(listingsMatch ? listingsMatch[1] : '');
   }
 
-  extractJijiRating($) {
-    const ratingText = $('.user-rating').text() ||
-                       $('.rating').text();
+  extractJijiRatingFromMarkdown(markdown) {
+    // Look for rating patterns
+    const ratingMatch = markdown.match(/(?:rating|stars)[:\s]+(\d+\.?\d*)/i) ||
+                       markdown.match(/(\d+\.?\d*)\s*(?:stars?|rating)/i);
     
-    return this.parseRating(ratingText);
+    return this.parseRating(ratingMatch ? ratingMatch[1] : '');
   }
 
-  extractJijiReviews($) {
-    const reviewsText = $('.total-reviews').text() ||
-                       $('.reviews-count').text() ||
-                       $('.b-leave-feedback-button').text() ||
-                       $('.b-seller-page__sidebar-buttons-item').text();
+  extractJijiReviewsFromMarkdown(markdown) {
+    // Look for reviews count
+    const reviewsMatch = markdown.match(/(?:reviews|feedback)[:\s]+(\d+)/i) ||
+                        markdown.match(/(\d+)\s*(?:reviews?|feedback)/i) ||
+                        markdown.match(/feedback\s*\((\d+)\)/i);
     
-    console.log('📊 Looking for Jiji reviews...');
-    console.log('  - .total-reviews found:', $('.total-reviews').text());
-    console.log('  - .reviews-count found:', $('.reviews-count').text());
-    console.log('  - .b-leave-feedback-button found:', $('.b-leave-feedback-button').text());
-    console.log('  - .b-seller-page__sidebar-buttons-item found:', $('.b-seller-page__sidebar-buttons-item').text());
-    
-    // Look for "View feedback (227)" pattern
-    const allText = $('body').text();
-    const feedbackMatch = allText.match(/feedback\s*\((\d+)\)/i);
-    const reviewMatch = allText.match(/reviews?\s*\((\d+)\)/i);
-    
-    console.log('🔍 Feedback pattern match:', feedbackMatch);
-    console.log('🔍 Review pattern match:', reviewMatch);
-    
-    if (feedbackMatch) {
-      return parseInt(feedbackMatch[1]);
-    }
-    if (reviewMatch) {
-      return parseInt(reviewMatch[1]);
-    }
-    
-    return this.parseNumber(reviewsText);
+    return this.parseNumber(reviewsMatch ? reviewsMatch[1] : '');
   }
 
-  extractJijiResponseRate($) {
-    const responseText = $('.response-rate').text();
-    return this.parsePercentage(responseText);
+  extractJijiResponseRateFromMarkdown(markdown) {
+    // Look for response rate
+    const responseMatch = markdown.match(/(?:response rate|response)[:\s]+(\d+)%/i) ||
+                         markdown.match(/(\d+)%\s*(?:response rate|response)/i);
+    
+    return this.parsePercentage(responseMatch ? responseMatch[1] : '');
   }
 
-  extractJijiVerification($) {
-    const verificationBadge = $('.verification-badge').text().trim();
-    const verified = $('.verified').text().trim();
-    const sellerLabels = $('.b-advert-seller__label').text().trim();
-    const allText = $('body').text();
-    
-    console.log('🔍 Looking for Jiji verification...');
-    console.log('  - .verification-badge found:', verificationBadge);
-    console.log('  - .verified found:', verified);
-    console.log('  - .b-advert-seller__label found:', sellerLabels);
-    
-    // Look for "Verified ID" or "Verified" in the text
-    if (allText.includes('Verified ID') || allText.includes('Verified')) {
-      console.log('✅ Found verification status: verified');
+  extractJijiVerificationFromMarkdown(markdown) {
+    // Look for verification status
+    if (markdown.match(/(?:verified id|verified)/i)) {
       return 'id-verified';
     }
-    
-    return verificationBadge || verified || 'unverified';
+    if (markdown.match(/(?:verified|verification)/i)) {
+      return 'verified';
+    }
+    return 'unverified';
   }
 
-  extractJijiRecentListings($) {
+  extractJijiRecentListingsFromMarkdown(markdown) {
     const listings = [];
     
-    console.log('📋 Looking for Jiji recent listings...');
+    // Look for listing patterns in markdown
+    const listingMatches = markdown.match(/(?:title|item|product)[:\s]+([^#\n]+)/gi);
     
-    // Try multiple selectors for listings
-    $('.b-seller-page__listing-items .b-advert-item, .b-advert-item, .b-listing-item').each((i, el) => {
-      const title = $(el).find('.b-advert-item__title, .b-listing-item__title, .b-advert-item__name').text().trim();
-      const price = $(el).find('.b-advert-item__price, .b-listing-item__price, .b-advert-item__price-value').text().trim();
-      const date = $(el).find('.b-advert-item__date, .b-listing-item__date, .b-advert-item__time').text().trim();
-      const category = $(el).find('.b-advert-item__category, .b-listing-item__category').text().trim();
-      
+    if (listingMatches) {
+      listingMatches.slice(0, 10).forEach(match => {
+        const title = match.replace(/(?:title|item|product)[:\s]+/i, '').trim();
       if (title && title.length > 5) {
         listings.push({ 
           title, 
-          price: this.extractPrice(price), 
-          date, 
-          category,
-          description: $(el).find('.b-advert-item__description, .b-listing-item__description').text().trim()
+            price: '', 
+            date: '', 
+            category: '',
+            description: ''
         });
       }
     });
+    }
     
-    console.log(`📋 Found ${listings.length} listings:`, listings.slice(0, 3));
-    
-    return listings.slice(0, 10); // Return last 10 listings for better analysis
+    return listings;
   }
 
-  extractJijiLastSeen($) {
-    const lastSeenText = $('.b-seller-info-tiles__item').first().text().trim() ||
-                         $('.b-seller-info-block__details').text().trim();
+  extractJijiLastSeenFromMarkdown(markdown) {
+    // Look for last seen patterns
+    const lastSeenMatch = markdown.match(/last seen (\d+)\s*(hours?|days?|minutes?)/i) ||
+                         markdown.match(/(?:last seen|active)[:\s]+([^#\n]+)/i);
     
-    console.log('🕐 Looking for Jiji last seen...');
-    console.log('  - .b-seller-info-tiles__item found:', $('.b-seller-info-tiles__item').first().text());
-    console.log('  - .b-seller-info-block__details found:', $('.b-seller-info-block__details').text());
-    
-    // Look for "Last seen X hours ago" pattern
-    const allText = $('body').text();
-    const lastSeenMatch = allText.match(/last seen (\d+)\s*(hours?|days?|minutes?)/i);
-    
-    console.log('🔍 Last seen pattern match:', lastSeenMatch);
-    
-    return lastSeenText || 'Unknown';
+    return lastSeenMatch ? lastSeenMatch[1] : 'Unknown';
   }
 
-  extractJijiFollowers($) {
-    const followersText = $('.b-seller-following-button__count').text().trim() ||
-                         $('.b-seller-info-block__follow').text().trim();
+  extractJijiFollowersFromMarkdown(markdown) {
+    // Look for followers count
+    const followersMatch = markdown.match(/(?:followers|following)[:\s]+(\d+)/i) ||
+                          markdown.match(/(\d+)\s*(?:followers?|following)/i);
     
-    console.log('👥 Looking for Jiji followers...');
-    console.log('  - .b-seller-following-button__count found:', $('.b-seller-following-button__count').text());
-    console.log('  - .b-seller-info-block__follow found:', $('.b-seller-info-block__follow').text());
-    
-    return this.parseNumber(followersText);
+    return this.parseNumber(followersMatch ? followersMatch[1] : '');
   }
 
-  extractJijiCategories($) {
+  extractJijiCategoriesFromMarkdown(markdown) {
     const categories = [];
     
-    console.log('📂 Looking for Jiji categories...');
+    // Look for category patterns
+    const categoryMatches = markdown.match(/(?:category|categories)[:\s]+([^#\n]+)/gi);
     
-    $('.b-seller-top-categories-list__item').each((i, el) => {
-      const category = $(el).find('.b-seller-top-categories-list__item-category').text().trim();
-      const count = $(el).find('.b-seller-top-categories-list__item-count').text().trim();
-      
-      if (category && count) {
+    if (categoryMatches) {
+      categoryMatches.forEach(match => {
+        const categoryText = match.replace(/(?:category|categories)[:\s]+/i, '').trim();
+        if (categoryText) {
         categories.push({
-          name: category,
-          count: this.parseNumber(count)
+            name: categoryText,
+            count: 0
         });
       }
     });
+    }
     
-    console.log(`📂 Found ${categories.length} categories:`, categories.slice(0, 5));
-    
-    return categories;
+    return categories.slice(0, 5);
   }
 
-  extractJijiTrustIndicators($) {
+  extractJijiTrustIndicatorsFromMarkdown(markdown) {
     return {
-      hasProfilePicture: !!this.extractJijiProfilePicture($),
-      hasLocation: this.extractJijiLocation($) !== 'Not specified',
-      hasBio: this.extractJijiBio($).length > 0,
-      accountAge: this.extractJijiAccountAge($),
-      totalReviews: this.extractJijiReviews($),
-      avgRating: this.extractJijiRating($),
-      verificationStatus: this.extractJijiVerification($),
-      followers: this.extractJijiFollowers($),
-      lastSeen: this.extractJijiLastSeen($)
+      hasProfilePicture: !!this.extractJijiProfilePictureFromMarkdown(markdown),
+      hasLocation: this.extractJijiLocationFromMarkdown(markdown) !== 'Not specified',
+      hasBio: this.extractJijiBioFromMarkdown(markdown).length > 0,
+      accountAge: this.extractJijiAccountAgeFromMarkdown(markdown),
+      totalReviews: this.extractJijiReviewsFromMarkdown(markdown),
+      avgRating: this.extractJijiRatingFromMarkdown(markdown),
+      verificationStatus: this.extractJijiVerificationFromMarkdown(markdown),
+      followers: this.extractJijiFollowersFromMarkdown(markdown),
+      lastSeen: this.extractJijiLastSeenFromMarkdown(markdown)
     };
   }
 
@@ -583,56 +500,10 @@ class ProfileExtractionService {
     return match ? parseInt(match[1]) : 0;
   }
 
-  /**
-   * Test proxy connectivity
-   * @param {string} testUrl - Optional test URL
-   * @returns {Promise<Object>} Test result
-   */
-  async testProxyConnection(testUrl = 'https://httpbin.org/ip') {
-    try {
-      console.log('🧪 Testing proxy connection...');
-      const result = await proxyService.testConnection(testUrl);
-      console.log('✅ Proxy test result:', result);
-      return result;
-    } catch (error) {
-      console.error('❌ Proxy test failed:', error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
+ 
 
-  /**
-   * Get proxy status and configuration
-   * @returns {Object} Proxy status information
-   */
-  getProxyStatus() {
-    return proxyService.getStatus();
-  }
 
-  /**
-   * Enable/disable proxy
-   * @param {boolean} enabled - Whether to enable proxy
-   */
-  setProxyEnabled(enabled) {
-    proxyService.setEnabled(enabled);
-    console.log(`🔧 Proxy ${enabled ? 'enabled' : 'disabled'} for profile extraction`);
-  }
 
-  /**
-   * Set proxy provider
-   * @param {string} provider - Provider name (scraperapi, brightdata, oxylabs, zyte)
-   */
-  setProxyProvider(provider) {
-    try {
-      proxyService.setProvider(provider);
-      console.log(`🔧 Proxy provider set to: ${provider} for profile extraction`);
-    } catch (error) {
-      console.error('❌ Failed to set proxy provider:', error.message);
-      throw error;
-    }
-  }
 }
 
 export default new ProfileExtractionService();
