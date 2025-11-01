@@ -36,6 +36,9 @@ export const extractAndScoreProfile = async (req, res) => {
     if (seller) {
       // Update existing seller with new data
       seller.profileData = extractedData.profileData;
+      seller.marketplaceData = extractedData.marketplaceData;
+      seller.recentListings = extractedData.recentListings;
+      seller.trustIndicators = extractedData.trustIndicators;
       seller.pulseScore = scoringResult.pulseScore;
       seller.confidenceLevel = scoringResult.confidenceLevel;
       seller.lastScored = new Date();
@@ -59,6 +62,9 @@ export const extractAndScoreProfile = async (req, res) => {
             platform: extractedData.platform,
             profileUrl,
             profileData: extractedData.profileData,
+            marketplaceData: extractedData.marketplaceData,
+            recentListings: extractedData.recentListings,
+            trustIndicators: extractedData.trustIndicators,
             pulseScore: scoringResult.pulseScore,
             confidenceLevel: scoringResult.confidenceLevel,
             lastScored: new Date(),
@@ -78,6 +84,9 @@ export const extractAndScoreProfile = async (req, res) => {
             if (seller) {
               console.log('Found existing seller, updating...');
               seller.profileData = extractedData.profileData;
+              seller.marketplaceData = extractedData.marketplaceData;
+              seller.recentListings = extractedData.recentListings;
+              seller.trustIndicators = extractedData.trustIndicators;
               seller.pulseScore = scoringResult.pulseScore;
               seller.confidenceLevel = scoringResult.confidenceLevel;
               seller.lastScored = new Date();
@@ -102,6 +111,9 @@ export const extractAndScoreProfile = async (req, res) => {
               if (seller) {
                 console.log('Found similar seller, updating...');
                 seller.profileData = extractedData.profileData;
+                seller.marketplaceData = extractedData.marketplaceData;
+                seller.recentListings = extractedData.recentListings;
+                seller.trustIndicators = extractedData.trustIndicators;
                 seller.pulseScore = scoringResult.pulseScore;
                 seller.confidenceLevel = scoringResult.confidenceLevel;
                 seller.lastScored = new Date();
@@ -117,6 +129,9 @@ export const extractAndScoreProfile = async (req, res) => {
                   platform: extractedData.platform,
                   profileUrl,
                   profileData: extractedData.profileData,
+                  marketplaceData: extractedData.marketplaceData,
+                  recentListings: extractedData.recentListings,
+                  trustIndicators: extractedData.trustIndicators,
                   pulseScore: scoringResult.pulseScore,
                   confidenceLevel: scoringResult.confidenceLevel,
                   lastScored: new Date(),
@@ -255,6 +270,9 @@ export const recalculateSellerScore = async (req, res) => {
 
     // Update seller with new score
     seller.profileData = extractedData.profileData;
+    seller.marketplaceData = extractedData.marketplaceData;
+    seller.recentListings = extractedData.recentListings;
+    seller.trustIndicators = extractedData.trustIndicators;
     seller.pulseScore = scoringResult.pulseScore;
     seller.confidenceLevel = scoringResult.confidenceLevel;
     seller.lastScored = new Date();

@@ -56,6 +56,75 @@ const sellerSchema = new mongoose.Schema(
       }
     },
     
+    // Marketplace data (extracted from platform)
+    marketplaceData: {
+      accountAge: {
+        type: Number,
+        default: 0
+      },
+      totalListings: {
+        type: Number,
+        default: 0
+      },
+      avgRating: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 5
+      },
+      totalReviews: {
+        type: Number,
+        default: 0
+      },
+      responseRate: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+      },
+      verificationStatus: {
+        type: String,
+        default: 'unverified'
+      },
+      lastSeen: {
+        type: String
+      },
+      followers: {
+        type: Number,
+        default: 0
+      },
+      categories: [{
+        name: String,
+        count: Number
+      }]
+    },
+    
+    // Recent listings (extracted from platform)
+    recentListings: [{
+      title: String,
+      price: String,
+      date: String,
+      category: String,
+      description: String,
+      extractedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }],
+    
+    // Trust indicators
+    trustIndicators: {
+      hasProfilePicture: Boolean,
+      hasLocation: Boolean,
+      hasBio: Boolean,
+      accountAge: Number,
+      totalReviews: Number,
+      avgRating: Number,
+      verificationStatus: String,
+      followers: Number,
+      lastSeen: String
+    },
+    
     // Pulse Score and trust metrics
     pulseScore: {
       type: Number,

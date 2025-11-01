@@ -195,37 +195,32 @@ export const sendVerificationCode = async (req, res) => {
     const code = user.generateVerificationCode();
     await user.save();
 
-    // Send code based on method
-    try {
-      if (method === 'phone') {
-        await sendOTP(user.phone, code);
-        res.status(200).json({
-          success: true,
-          message: 'Verification code sent via SMS',
-          // For testing purposes - remove in production
-          ...(process.env.NODE_ENV === 'development' && { verificationCode: code })
-        });
-      } else if (method === 'email') {
-        await sendEmailOTP(user.email, code, user.name);
-        res.status(200).json({
-          success: true,
-          message: 'Verification code sent via email',
-          // For testing purposes - remove in production
-          ...(process.env.NODE_ENV === 'development' && { verificationCode: code })
-        });
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid verification method. Use "email" or "phone"'
-        });
-      }
-    } catch (error) {
-      console.error('Send verification error:', error);
-      return res.status(500).json({
+    // Validate method
+    if (!method || !['email', 'phone'].includes(method)) {
+      return res.status(400).json({
         success: false,
-        message: error.message || 'Failed to send verification code'
+        message: 'Invalid verification method. Use "email" or "phone"'
       });
     }
+
+    // Send code based on method (non-blocking - send in background)
+    if (method === 'phone') {
+      sendOTP(user.phone, code).catch(error => {
+        console.error('Failed to send SMS verification code:', error.message);
+      });
+    } else {
+      sendEmailOTP(user.email, code, user.name).catch(error => {
+        console.error('Failed to send email verification code:', error.message);
+      });
+    }
+
+    // Respond immediately without waiting for send to complete
+    res.status(200).json({
+      success: true,
+      message: `Verification code sent via ${method}`,
+      // For testing purposes - remove in production
+      ...(process.env.NODE_ENV === 'development' && { verificationCode: code })
+    });
   } catch (error) {
     console.error('Verification send error:', error);
     res.status(500).json({
@@ -282,27 +277,24 @@ export const resendVerificationCode = async (req, res) => {
     const code = user.generateVerificationCode();
     await user.save();
 
-    // Send code based on method
-    try {
-      if (method === 'phone') {
-        await sendOTP(user.phone, code);
-      } else {
-        await sendEmailOTP(user.email, code, user.name);
-      }
-
-      res.status(200).json({
-        success: true,
-        message: `Verification code sent via ${method}. Please check your ${method === 'email' ? 'inbox' : 'messages'}.`,
-        // For testing purposes - remove in production
-        ...(process.env.NODE_ENV === 'development' && { verificationCode: code })
+    // Send code based on method (non-blocking - send in background)
+    if (method === 'phone') {
+      sendOTP(user.phone, code).catch(error => {
+        console.error('Failed to send SMS verification code:', error.message);
       });
-    } catch (error) {
-      console.error('Resend verification error:', error);
-      return res.status(500).json({
-        success: false,
-        message: `Failed to send verification code via ${method}. Please try again.`
+    } else {
+      sendEmailOTP(user.email, code, user.name).catch(error => {
+        console.error('Failed to send email verification code:', error.message);
       });
     }
+
+    // Respond immediately without waiting for send to complete
+    res.status(200).json({
+      success: true,
+      message: `Verification code sent via ${method}. Please check your ${method === 'email' ? 'inbox' : 'messages'}.`,
+      // For testing purposes - remove in production
+      ...(process.env.NODE_ENV === 'development' && { verificationCode: code })
+    });
   } catch (error) {
     console.error('Resend verification error:', error);
     res.status(500).json({
@@ -497,32 +489,24 @@ export const forgotPassword = async (req, res) => {
     const resetToken = user.generatePasswordResetToken();
     await user.save();
 
-    // Send reset code
-    try {
-      if (method === 'phone') {
-        await sendOTP(user.phone, resetToken, 'reset');
-      } else {
-        await sendEmailOTP(user.email, resetToken, user.name, 'reset');
-      }
-
-      res.status(200).json({
-        success: true,
-        message: `Password reset code sent via ${method}. The code will expire in 15 minutes.`,
-        // For testing purposes - remove in production
-        ...(process.env.NODE_ENV === 'development' && { resetCode: resetToken })
+    // Send reset code (non-blocking - send in background)
+    if (method === 'phone') {
+      sendOTP(user.phone, resetToken, 'reset').catch(error => {
+        console.error('Failed to send SMS reset code:', error.message);
       });
-    } catch (error) {
-      console.error('Send reset code error:', error);
-      // Clear the reset token if sending failed
-      user.resetPasswordToken = undefined;
-      user.resetPasswordExpires = undefined;
-      await user.save();
-
-      return res.status(500).json({
-        success: false,
-        message: `Failed to send reset code via ${method}. Please try again.`
+    } else {
+      sendEmailOTP(user.email, resetToken, user.name, 'reset').catch(error => {
+        console.error('Failed to send email reset code:', error.message);
       });
     }
+
+    // Respond immediately without waiting for send to complete
+    res.status(200).json({
+      success: true,
+      message: `Password reset code sent via ${method}. The code will expire in 15 minutes.`,
+      // For testing purposes - remove in production
+      ...(process.env.NODE_ENV === 'development' && { resetCode: resetToken })
+    });
   } catch (error) {
     console.error('Forgot password error:', error);
     res.status(500).json({

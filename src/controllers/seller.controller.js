@@ -85,6 +85,9 @@ export const becomeSeller = async (req, res) => {
         name: user.name,
         location: 'Not specified'
       },
+      marketplaceData: extractedData?.marketplaceData || {},
+      recentListings: extractedData?.recentListings || [],
+      trustIndicators: extractedData?.trustIndicators || {},
       pulseScore: scoringResult?.pulseScore || 50,
       confidenceLevel: scoringResult?.confidenceLevel || 'low',
       lastScored: new Date(),
