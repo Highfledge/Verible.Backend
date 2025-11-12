@@ -4,7 +4,10 @@ import {
   updateProfile,
   deleteAccount,
   getMyFeedback,
-  getMyInteractions
+  getMyInteractions,
+  getUserExtractions,
+  getRecentActivity,
+  getTopThreats
 } from '../controllers/user.controller.js';
 import { isAuthenticated, isActive } from '../middleware/auth.middleware.js';
 
@@ -62,6 +65,27 @@ router.get('/my-feedback', isAuthenticated, isActive, getMyFeedback);
  * @access  Private
  */
 router.get('/my-interactions', isAuthenticated, isActive, getMyInteractions);
+
+/**
+ * @route   GET /api/users/my-extractions
+ * @desc    Get user's extracted sellers with metrics
+ * @access  Private
+ */
+router.get('/my-extractions', isAuthenticated, isActive, getUserExtractions);
+
+/**
+ * @route   GET /api/users/recent-activity
+ * @desc    Get user's recent activity (unified feed of extractions, flags, endorsements)
+ * @access  Private
+ */
+router.get('/recent-activity', isAuthenticated, isActive, getRecentActivity);
+
+/**
+ * @route   GET /api/users/threats/top
+ * @desc    Get top 5 critical threats (sellers with worst pulse scores)
+ * @access  Private
+ */
+router.get('/threats/top', isAuthenticated, isActive, getTopThreats);
 
 export default router;
 

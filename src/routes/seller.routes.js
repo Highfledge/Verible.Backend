@@ -1,6 +1,6 @@
 import express from 'express';
 import { body, param } from 'express-validator';
-import { isAuthenticated, isActive } from '../middleware/auth.middleware.js';
+import { isAuthenticated, isActive, optionalAuth } from '../middleware/auth.middleware.js';
 import {
   becomeSeller,
   getMySellerProfile,
@@ -88,9 +88,9 @@ const updateProfileValidation = [
 /**
  * @route   POST /api/sellers/extract-profile
  * @desc    Extract Seller Profile From Url
- * @access  Public
+ * @access  Public (optional auth - tracks extraction if authenticated)
  */
-router.post('/extract-profile', profileUrlValidation, extractAndScoreProfile);
+router.post('/extract-profile', optionalAuth, profileUrlValidation, extractAndScoreProfile);
 
 /**
  * @route   POST /api/sellers/score-by-url

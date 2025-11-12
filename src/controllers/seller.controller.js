@@ -5,6 +5,39 @@ import pulseScoringService from '../services/pulseScoring.service.js';
 import { validationResult } from 'express-validator';
 
 /**
+ * Helper function to get confidence level from pulse score
+ * Returns values matching the Seller model enum: 'Very Low', 'Low', 'Medium', 'High', 'Very High'
+ */
+const getConfidenceLevelFromScore = (pulseScore) => {
+  if (pulseScore >= 80) return 'Very High';
+  if (pulseScore >= 60) return 'High';
+  if (pulseScore >= 40) return 'Medium';
+  if (pulseScore >= 20) return 'Low';
+  return 'Very Low';
+};
+
+/**
+ * Helper function to normalize confidence level to valid enum value
+ * Handles legacy lowercase values and converts them to proper format
+ */
+const normalizeConfidenceLevel = (confidenceLevel) => {
+  if (!confidenceLevel) return 'Low';
+  
+  const normalized = confidenceLevel.toString().trim();
+  
+  // Map lowercase/incorrect values to correct enum values
+  const mapping = {
+    'very low': 'Very Low',
+    'low': 'Low',
+    'medium': 'Medium',
+    'high': 'High',
+    'very high': 'Very High'
+  };
+  
+  return mapping[normalized.toLowerCase()] || normalized;
+};
+
+/**
  * Create seller profile from existing user account
  * POST /api/sellers/become-seller
  */
@@ -89,7 +122,7 @@ export const becomeSeller = async (req, res) => {
       recentListings: extractedData?.recentListings || [],
       trustIndicators: extractedData?.trustIndicators || {},
       pulseScore: scoringResult?.pulseScore || 50,
-      confidenceLevel: scoringResult?.confidenceLevel || 'low',
+      confidenceLevel: scoringResult?.confidenceLevel || 'Low',
       lastScored: new Date(),
       scoringFactors: scoringResult?.scoringFactors || {},
       isClaimed: true,
@@ -476,6 +509,16 @@ export const flagSeller = async (req, res) => {
       });
     }
 
+    // Normalize confidenceLevel if it has an invalid value and save it
+    // This ensures the document is valid before addFlag() calls save()
+    if (seller.confidenceLevel) {
+      const normalized = normalizeConfidenceLevel(seller.confidenceLevel);
+      if (normalized !== seller.confidenceLevel) {
+        seller.confidenceLevel = normalized;
+        await seller.save();
+      }
+    }
+
     // Check if user can interact with this seller
     if (!seller.canUserInteract(userId)) {
       return res.status(400).json({
@@ -497,8 +540,12 @@ export const flagSeller = async (req, res) => {
 
     // Recalculate pulse score after adding flag
     const updatedSeller = await Seller.findById(id);
+    // Normalize confidenceLevel if it has an invalid value
+    if (updatedSeller.confidenceLevel) {
+      updatedSeller.confidenceLevel = normalizeConfidenceLevel(updatedSeller.confidenceLevel);
+    }
     const newPulseScore = Math.max(0, updatedSeller.pulseScore - 5); // Reduce score by 5 points
-    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    const newConfidenceLevel = getConfidenceLevelFromScore(newPulseScore);
     
     updatedSeller.pulseScore = newPulseScore;
     updatedSeller.confidenceLevel = newConfidenceLevel;
@@ -546,6 +593,16 @@ export const endorseSeller = async (req, res) => {
       });
     }
 
+    // Normalize confidenceLevel if it has an invalid value and save it
+    // This ensures the document is valid before addEndorsement() calls save()
+    if (seller.confidenceLevel) {
+      const normalized = normalizeConfidenceLevel(seller.confidenceLevel);
+      if (normalized !== seller.confidenceLevel) {
+        seller.confidenceLevel = normalized;
+        await seller.save();
+      }
+    }
+
     // Check if user can interact with this seller
     if (!seller.canUserInteract(userId)) {
       return res.status(400).json({
@@ -567,8 +624,12 @@ export const endorseSeller = async (req, res) => {
 
     // Recalculate pulse score after adding endorsement
     const updatedSeller = await Seller.findById(id);
+    // Normalize confidenceLevel if it has an invalid value
+    if (updatedSeller.confidenceLevel) {
+      updatedSeller.confidenceLevel = normalizeConfidenceLevel(updatedSeller.confidenceLevel);
+    }
     const newPulseScore = Math.min(100, updatedSeller.pulseScore + 3); // Increase score by 3 points
-    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    const newConfidenceLevel = getConfidenceLevelFromScore(newPulseScore);
     
     updatedSeller.pulseScore = newPulseScore;
     updatedSeller.confidenceLevel = newConfidenceLevel;
@@ -615,6 +676,11 @@ export const removeFlag = async (req, res) => {
       });
     }
 
+    // Normalize confidenceLevel if it has an invalid value
+    if (seller.confidenceLevel) {
+      seller.confidenceLevel = normalizeConfidenceLevel(seller.confidenceLevel);
+    }
+
     // Find and remove the flag
     const flagIndex = seller.flags.findIndex(flag => flag.userId.toString() === userId.toString());
     if (flagIndex === -1) {
@@ -629,7 +695,7 @@ export const removeFlag = async (req, res) => {
 
     // Recalculate pulse score after removing flag
     const newPulseScore = Math.min(100, seller.pulseScore + 5); // Restore score by 5 points
-    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    const newConfidenceLevel = getConfidenceLevelFromScore(newPulseScore);
     
     seller.pulseScore = newPulseScore;
     seller.confidenceLevel = newConfidenceLevel;
@@ -673,6 +739,11 @@ export const removeEndorsement = async (req, res) => {
       });
     }
 
+    // Normalize confidenceLevel if it has an invalid value
+    if (seller.confidenceLevel) {
+      seller.confidenceLevel = normalizeConfidenceLevel(seller.confidenceLevel);
+    }
+
     // Find and remove the endorsement
     const endorsementIndex = seller.endorsements.findIndex(endorsement => endorsement.userId.toString() === userId.toString());
     if (endorsementIndex === -1) {
@@ -687,7 +758,7 @@ export const removeEndorsement = async (req, res) => {
 
     // Recalculate pulse score after removing endorsement
     const newPulseScore = Math.max(0, seller.pulseScore - 3); // Reduce score by 3 points
-    const newConfidenceLevel = newPulseScore >= 70 ? 'high' : newPulseScore >= 50 ? 'medium' : 'low';
+    const newConfidenceLevel = getConfidenceLevelFromScore(newPulseScore);
     
     seller.pulseScore = newPulseScore;
     seller.confidenceLevel = newConfidenceLevel;

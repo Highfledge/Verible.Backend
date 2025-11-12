@@ -1,4 +1,5 @@
 import Seller from '../models/Seller.model.js';
+import Extraction from '../models/Extraction.model.js';
 import profileExtractionService from '../services/profileExtraction.service.js';
 import pulseScoringService from '../services/pulseScoring.service.js';
 import { validationResult } from 'express-validator';
@@ -68,6 +69,26 @@ export const extractAndScoreProfile = async (req, res) => {
         message: 'Failed to create or find seller record',
         error: 'Seller record not found after processing'
       });
+    }
+
+    // Track extraction if user is authenticated
+    if (req.user && req.user._id) {
+      try {
+        // Use findOneAndUpdate with upsert to handle duplicate extractions gracefully
+        await Extraction.findOneAndUpdate(
+          { userId: req.user._id, sellerId: seller._id },
+          {
+            userId: req.user._id,
+            sellerId: seller._id,
+            pulseScoreAtExtraction: scoringResult.pulseScore,
+            extractedAt: new Date()
+          },
+          { upsert: true, new: true }
+        );
+      } catch (error) {
+        // Log error but don't fail the request if extraction tracking fails
+        console.error('Failed to track extraction:', error);
+      }
     }
 
     res.status(200).json({
