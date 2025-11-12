@@ -2,6 +2,15 @@ import Seller from '../models/Seller.model.js';
 import profileExtractionService from '../services/profileExtraction.service.js';
 import pulseScoringService from '../services/pulseScoring.service.js';
 import { validationResult } from 'express-validator';
+import {
+  buildVeribleFeedback,
+  saveExtractedSeller
+} from '../services/sellerProfilePersistence.service.js';
+import {
+  determineTrustLevel,
+  assessRiskLevel,
+  generateAnalysisRecommendations
+} from '../utils/sellerAnalysis.utils.js';
 
 /**
  * Extract and score seller profile from URL
@@ -24,138 +33,35 @@ export const extractAndScoreProfile = async (req, res) => {
     // Extract profile data
     const extractedData = await profileExtractionService.extractProfile(profileUrl);
     
-    // Calculate pulse score
+    const existingSeller = await Seller.findOne({ profileUrl });
+    const veribleFeedback = buildVeribleFeedback(existingSeller);
+    
+    // Calculate pulse score with Verible feedback if available
     const scoringResult = await pulseScoringService.calculatePulseScore(
       extractedData,
-      extractedData.recentListings || []
+      extractedData.recentListings || [],
+      veribleFeedback
     );
 
-    // Check if seller already exists by profileUrl
-    let seller = await Seller.findOne({ profileUrl });
-    
-    if (seller) {
-      // Update existing seller with new data
-      seller.profileData = extractedData.profileData;
-      seller.marketplaceData = extractedData.marketplaceData;
-      seller.recentListings = extractedData.recentListings;
-      seller.trustIndicators = extractedData.trustIndicators;
-      seller.pulseScore = scoringResult.pulseScore;
-      seller.confidenceLevel = scoringResult.confidenceLevel;
-      seller.lastScored = new Date();
-      seller.scoringFactors = scoringResult.scoringFactors;
-      await seller.save();
-    } else {
-      // Try multiple strategies to create/update seller
-      let sellerCreated = false;
-      let attempts = 0;
-      const maxAttempts = 3;
-
-      while (!sellerCreated && attempts < maxAttempts) {
-        try {
-          attempts++;
-          console.log(`Attempt ${attempts} to create seller...`);
-          
-          // Create new seller record (no userId for extracted profiles)
-          seller = new Seller({
-            userId: null, // Explicitly set to null for extracted profiles
-            sellerId: `extracted-${Date.now()}-${attempts}`,
-            platform: extractedData.platform,
-            profileUrl,
-            profileData: extractedData.profileData,
-            marketplaceData: extractedData.marketplaceData,
-            recentListings: extractedData.recentListings,
-            trustIndicators: extractedData.trustIndicators,
-            pulseScore: scoringResult.pulseScore,
-            confidenceLevel: scoringResult.confidenceLevel,
-            lastScored: new Date(),
-            scoringFactors: scoringResult.scoringFactors,
-            isActive: true,
-            isClaimed: false // Not claimed by any user yet
-          });
-          await seller.save();
-          sellerCreated = true;
-          console.log('Seller created successfully');
-        } catch (error) {
-          if (error.code === 11000) {
-            console.log(`Duplicate key error on attempt ${attempts}, trying different approach...`);
-            
-            // Try to find existing seller by profileUrl
-            seller = await Seller.findOne({ profileUrl });
-            if (seller) {
-              console.log('Found existing seller, updating...');
-              seller.profileData = extractedData.profileData;
-              seller.marketplaceData = extractedData.marketplaceData;
-              seller.recentListings = extractedData.recentListings;
-              seller.trustIndicators = extractedData.trustIndicators;
-              seller.pulseScore = scoringResult.pulseScore;
-              seller.confidenceLevel = scoringResult.confidenceLevel;
-              seller.lastScored = new Date();
-              seller.scoringFactors = scoringResult.scoringFactors;
-              await seller.save();
-              sellerCreated = true;
-            } else if (attempts < maxAttempts) {
-              // Try with a different sellerId
-              console.log(`Trying with different sellerId on attempt ${attempts + 1}...`);
-              continue;
-            } else {
-              // Last attempt failed, try to find any seller with this profileUrl
-              console.log('All attempts failed, trying to find any existing seller...');
-              seller = await Seller.findOne({ 
-                $or: [
-                  { profileUrl },
-                  { 'profileData.name': extractedData.profileData.name },
-                  { platform: extractedData.platform, sellerId: { $regex: 'extracted-' } }
-                ]
-              });
-              
-              if (seller) {
-                console.log('Found similar seller, updating...');
-                seller.profileData = extractedData.profileData;
-                seller.marketplaceData = extractedData.marketplaceData;
-                seller.recentListings = extractedData.recentListings;
-                seller.trustIndicators = extractedData.trustIndicators;
-                seller.pulseScore = scoringResult.pulseScore;
-                seller.confidenceLevel = scoringResult.confidenceLevel;
-                seller.lastScored = new Date();
-                seller.scoringFactors = scoringResult.scoringFactors;
-                await seller.save();
-                sellerCreated = true;
-              } else {
-                console.log('No existing seller found, creating with unique ID...');
-                // Create with a completely unique ID
-                seller = new Seller({
-                  userId: null,
-                  sellerId: `extracted-${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${attempts}`,
-                  platform: extractedData.platform,
-                  profileUrl,
-                  profileData: extractedData.profileData,
-                  marketplaceData: extractedData.marketplaceData,
-                  recentListings: extractedData.recentListings,
-                  trustIndicators: extractedData.trustIndicators,
-                  pulseScore: scoringResult.pulseScore,
-                  confidenceLevel: scoringResult.confidenceLevel,
-                  lastScored: new Date(),
-                  scoringFactors: scoringResult.scoringFactors,
-                  isActive: true,
-                  isClaimed: false
-                });
-                await seller.save();
-                sellerCreated = true;
-              }
-            }
-          } else {
-            console.error('Non-duplicate error:', error);
-            throw error;
-          }
+    // Handle insufficient data case
+    if (scoringResult.status === 'insufficient_data') {
+      return res.status(200).json({
+        success: true,
+        message: 'Profile extracted but insufficient data for scoring',
+        data: {
+          extractedData,
+          scoringResult
         }
-      }
-
-      if (!sellerCreated) {
-        throw new Error('Failed to create or find seller after multiple attempts');
-      }
+      });
     }
 
-    // Ensure seller exists before proceeding
+    const seller = await saveExtractedSeller({
+      existingSeller,
+      profileUrl,
+      extractedData,
+      scoringResult
+    });
+
     if (!seller) {
       return res.status(500).json({
         success: false,
@@ -210,10 +116,11 @@ export const scoreProfileByUrl = async (req, res) => {
     // Extract profile data
     const extractedData = await profileExtractionService.extractProfile(profileUrl);
     
-    // Calculate pulse score
+    // Calculate pulse score (no Verible feedback for quick scores)
     const scoringResult = await pulseScoringService.calculatePulseScore(
       extractedData,
-      extractedData.recentListings || []
+      extractedData.recentListings || [],
+      null
     );
 
     res.status(200).json({
@@ -229,7 +136,7 @@ export const scoreProfileByUrl = async (req, res) => {
           recommendations: scoringResult.recommendations,
           trustIndicators: scoringResult.trustIndicators,
           riskFactors: scoringResult.riskFactors,
-          scoringFactors: scoringResult.scoringFactors
+          categories: scoringResult.categories // Return categories in API response
         }
       }
     });
@@ -262,10 +169,17 @@ export const recalculateSellerScore = async (req, res) => {
     // Re-extract profile data
     const extractedData = await profileExtractionService.extractProfile(seller.profileUrl);
     
-    // Recalculate pulse score
+    // Get Verible feedback for this seller
+    const veribleFeedback = {
+      endorsements: seller.endorsements || [],
+      flags: seller.flags || []
+    };
+    
+    // Recalculate pulse score with Verible feedback
     const scoringResult = await pulseScoringService.calculatePulseScore(
       extractedData,
-      extractedData.recentListings || []
+      extractedData.recentListings || [],
+      veribleFeedback
     );
 
     // Update seller with new score
@@ -276,7 +190,7 @@ export const recalculateSellerScore = async (req, res) => {
     seller.pulseScore = scoringResult.pulseScore;
     seller.confidenceLevel = scoringResult.confidenceLevel;
     seller.lastScored = new Date();
-    seller.scoringFactors = scoringResult.scoringFactors;
+    seller.scoringFactors = scoringResult.categories; // Save categories as scoringFactors
     await seller.save();
 
     res.status(200).json({
@@ -338,8 +252,8 @@ export const getSellerAnalysis = async (req, res) => {
       },
       scoringBreakdown: seller.scoringFactors || {},
       trustLevel: this.determineTrustLevel(seller.pulseScore),
-      riskAssessment: this.assessRiskLevel(seller.pulseScore, seller.flags.length),
-      recommendations: this.generateAnalysisRecommendations(seller)
+      riskAssessment: assessRiskLevel(seller.pulseScore, seller.flags.length),
+      recommendations: generateAnalysisRecommendations(seller)
     };
 
     res.status(200).json({
@@ -355,74 +269,3 @@ export const getSellerAnalysis = async (req, res) => {
     });
   }
 };
-
-/**
- * Determine trust level based on pulse score
- */
-function determineTrustLevel(pulseScore) {
-  if (pulseScore >= 80) return 'High Trust';
-  if (pulseScore >= 60) return 'Medium Trust';
-  if (pulseScore >= 40) return 'Low Trust';
-  return 'High Risk';
-}
-
-/**
- * Assess risk level
- */
-function assessRiskLevel(pulseScore, flagCount) {
-  if (pulseScore >= 70 && flagCount === 0) return 'Low Risk';
-  if (pulseScore >= 50 && flagCount < 3) return 'Medium Risk';
-  if (pulseScore >= 30 || flagCount >= 3) return 'High Risk';
-  return 'Very High Risk';
-}
-
-/**
- * Generate analysis recommendations
- */
-function generateAnalysisRecommendations(seller) {
-  const recommendations = [];
-
-  if (seller.pulseScore >= 80) {
-    recommendations.push({
-      type: 'positive',
-      message: 'Highly recommended seller with excellent track record',
-      action: 'Safe to transact'
-    });
-  } else if (seller.pulseScore >= 60) {
-    recommendations.push({
-      type: 'positive',
-      message: 'Good seller with minor concerns',
-      action: 'Proceed with caution'
-    });
-  } else if (seller.pulseScore >= 40) {
-    recommendations.push({
-      type: 'warning',
-      message: 'Mixed indicators - review carefully',
-      action: 'Request additional verification'
-    });
-  } else {
-    recommendations.push({
-      type: 'negative',
-      message: 'High risk seller - avoid transaction',
-      action: 'Do not proceed'
-    });
-  }
-
-  if (seller.flags.length > 0) {
-    recommendations.push({
-      type: 'warning',
-      message: `${seller.flags.length} flags reported against this seller`,
-      action: 'Review flag details before proceeding'
-    });
-  }
-
-  if (seller.verificationStatus === 'unverified') {
-    recommendations.push({
-      type: 'warning',
-      message: 'Unverified seller identity',
-      action: 'Request identity verification'
-    });
-  }
-
-  return recommendations;
-}

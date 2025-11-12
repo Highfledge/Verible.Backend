@@ -22,7 +22,7 @@ const sellerSchema = new mongoose.Schema(
     platform: {
       type: String,
       required: true,
-      enum: ['facebook', 'jiji', 'other'],
+      enum: ['facebook', 'jiji', 'jumia', 'konga', 'etsy', 'kijiji', 'other'],
       default: 'facebook'
     },
     
@@ -93,9 +93,43 @@ const sellerSchema = new mongoose.Schema(
         type: Number,
         default: 0
       },
+      sellerScore: {
+        type: Number,
+        default: 0
+      },
+      successfulSales: {
+        type: Number,
+        default: 0
+      },
+      shippingSpeed: {
+        type: String,
+        trim: true
+      },
+      qualityScore: {
+        type: String,
+        trim: true
+      },
+      customerRatingLabel: {
+        type: String,
+        trim: true
+      },
+      officialStore: {
+        type: Boolean,
+        default: false
+      },
       categories: [{
         name: String,
         count: Number
+      }],
+      customerReviews: [{
+        productName: String,
+        productUrl: String,
+        rating: Number,
+        title: String,
+        review: String,
+        reviewer: String,
+        date: String,
+        verifiedPurchase: Boolean
       }]
     },
     
@@ -136,8 +170,8 @@ const sellerSchema = new mongoose.Schema(
     
     confidenceLevel: {
       type: String,
-      enum: ['low', 'medium', 'high'],
-      default: 'low',
+      enum: ['Very Low', 'Low', 'Medium', 'High', 'Very High'],
+      default: 'Low',
       required: true
     },
     
@@ -220,28 +254,10 @@ const sellerSchema = new mongoose.Schema(
       }
     }],
     
-    // Scoring factors (for analysis)
+    // Scoring factors (for analysis) - flexible schema for new categories
     scoringFactors: {
-      priceAnomaly: {
-        type: Number,
-        default: 0
-      },
-      urgencyScore: {
-        type: Number,
-        default: 0
-      },
-      profileCompleteness: {
-        type: Number,
-        default: 0
-      },
-      listingActivity: {
-        type: Number,
-        default: 0
-      },
-      userFeedback: {
-        type: Number,
-        default: 0
-      }
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     },
     
     // Status flags

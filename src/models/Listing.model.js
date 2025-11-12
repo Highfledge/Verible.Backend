@@ -20,7 +20,7 @@ const listingSchema = new mongoose.Schema(
     platform: {
       type: String,
       required: true,
-      enum: ['facebook', 'jiji', 'other'],
+      enum: ['facebook', 'jiji', 'jumia', 'konga', 'etsy', 'kijiji', 'other'],
       index: true
     },
     

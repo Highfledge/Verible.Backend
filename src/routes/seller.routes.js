@@ -31,7 +31,7 @@ const router = express.Router();
 // Validation rules
 const becomeSellerValidation = [
   body('platform')
-    .isIn(['facebook', 'jiji', 'other'])
+    .isIn(['facebook', 'jiji', 'jumia', 'konga', 'etsy', 'kijiji', 'other'])
     .withMessage('Platform must be facebook, jiji, or other'),
   body('profileUrl')
     .isURL()
@@ -69,7 +69,7 @@ const claimSellerValidation = [
     .notEmpty()
     .withMessage('Seller ID is required'),
   body('platform')
-    .isIn(['facebook', 'jiji', 'other'])
+    .isIn(['facebook', 'jiji', 'jumia', 'konga', 'etsy', 'kijiji', 'other'])
     .withMessage('Platform must be facebook, jiji, or other'),
   body('profileUrl')
     .isURL()
