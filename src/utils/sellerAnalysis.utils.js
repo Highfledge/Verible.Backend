@@ -1,6 +1,6 @@
 export function determineTrustLevel(pulseScore) {
-  if (pulseScore >= 80) return 'High Trust';
-  if (pulseScore >= 60) return 'Medium Trust';
+  if (pulseScore >= 80) return 'Very High Trust';
+  if (pulseScore >= 65) return 'Medium Trust';
   if (pulseScore >= 40) return 'Low Trust';
   return 'High Risk';
 }
@@ -21,7 +21,7 @@ export function generateAnalysisRecommendations(seller) {
       message: 'Highly recommended seller with excellent track record',
       action: 'Safe to transact'
     });
-  } else if (seller.pulseScore >= 60) {
+  } else if (seller.pulseScore >= 65) {
     recommendations.push({
       type: 'positive',
       message: 'Good seller with minor concerns',

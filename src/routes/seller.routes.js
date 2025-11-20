@@ -3,6 +3,8 @@ import { body, param } from 'express-validator';
 import { isAuthenticated, isActive, optionalAuth } from '../middleware/auth.middleware.js';
 import {
   becomeSeller,
+  generateVerificationCode,
+  verifyProfile,
   getMySellerProfile,
   deleteSellerAccount,
   updateSellerProfile,
@@ -100,8 +102,22 @@ router.post('/extract-profile', optionalAuth, profileUrlValidation, extractAndSc
 router.post('/score-by-url', profileUrlValidation, scoreProfileByUrl);
 
 /**
+ * @route   POST /api/sellers/generate-verification-code
+ * @desc    Generate verification code for profile URL
+ * @access  Private (User must be authenticated)
+ */
+router.post('/generate-verification-code', isAuthenticated, isActive, profileUrlValidation, generateVerificationCode);
+
+/**
+ * @route   POST /api/sellers/verify-profile
+ * @desc    Verify profile by checking verification code in bio
+ * @access  Private (User must be authenticated)
+ */
+router.post('/verify-profile', isAuthenticated, isActive, profileUrlValidation, verifyProfile);
+
+/**
  * @route   POST /api/sellers/become-seller
- * @desc    Become Seller
+ * @desc    Become Seller (requires verified profile)
  * @access  Private (User must be authenticated)
  */
 router.post('/become-seller', isAuthenticated, isActive, becomeSellerValidation, becomeSeller);

@@ -1,5 +1,6 @@
 import Seller from '../models/Seller.model.js';
 import User from '../models/User.model.js';
+import ProfileVerification from '../models/ProfileVerification.model.js';
 import profileExtractionService from '../services/profileExtraction.service.js';
 import pulseScoringService from '../services/pulseScoring.service.js';
 import { validationResult } from 'express-validator';
@@ -38,6 +39,220 @@ const normalizeConfidenceLevel = (confidenceLevel) => {
 };
 
 /**
+ * Generate verification code for profile URL
+ * POST /api/sellers/generate-verification-code
+ */
+export const generateVerificationCode = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { profileUrl } = req.body;
+    const userId = req.user._id;
+
+    // Check if user is already a seller
+    const existingSeller = await Seller.findOne({ userId });
+    if (existingSeller) {
+      return res.status(400).json({
+        success: false,
+        message: 'User is already a seller'
+      });
+    }
+
+    // Expire old pending verifications for this user and profileUrl
+    await ProfileVerification.updateMany(
+      {
+        userId,
+        profileUrl,
+        status: 'pending',
+        expiresAt: { $lt: new Date() }
+      },
+      {
+        $set: { status: 'expired' }
+      }
+    );
+
+    // Check if there's an active verification
+    const activeVerification = await ProfileVerification.findActiveVerification(userId, profileUrl);
+    if (activeVerification) {
+      return res.status(200).json({
+        success: true,
+        message: 'Verification code already generated',
+        data: {
+          verificationCode: activeVerification.verificationCode,
+          expiresAt: activeVerification.expiresAt,
+          profileUrl: activeVerification.profileUrl
+        }
+      });
+    }
+
+    // Generate unique verification code
+    // Format: VER- followed by 8 alphanumeric characters
+    const generateCode = () => {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluding confusing chars like 0, O, I, 1
+      let code = 'VER-';
+      for (let i = 0; i < 8; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return code;
+    };
+
+    let verificationCode = generateCode();
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    // Ensure code is unique
+    while (attempts < maxAttempts) {
+      const existing = await ProfileVerification.findOne({ verificationCode, status: 'pending' });
+      if (!existing) {
+        break;
+      }
+      verificationCode = generateCode();
+      attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate unique verification code. Please try again.'
+      });
+    }
+
+    // Create verification record (expires in 24 hours)
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const verification = new ProfileVerification({
+      userId,
+      profileUrl,
+      verificationCode: "inverter",
+      status: 'pending',
+      expiresAt
+    });
+
+    await verification.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Verification code generated successfully',
+      data: {
+        verificationCode,
+        expiresAt,
+        profileUrl,
+        instructions: 'Please add this verification code to your profile bio/description on the platform, then verify your profile.'
+      }
+    });
+  } catch (error) {
+    console.error('Generate verification code error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate verification code',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Verify profile by checking if verification code exists in bio
+ * POST /api/sellers/verify-profile
+ */
+export const verifyProfile = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { profileUrl } = req.body;
+    const userId = req.user._id;
+
+    // Find active verification
+    const verification = await ProfileVerification.findActiveVerification(userId, profileUrl);
+    if (!verification) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active verification found. Please generate a new verification code.'
+      });
+    }
+
+    // Check if already verified
+    if (verification.status === 'verified') {
+      return res.status(200).json({
+        success: true,
+        message: 'Profile already verified',
+        data: {
+          verified: true,
+          verifiedAt: verification.verifiedAt
+        }
+      });
+    }
+
+    // Extract profile data
+    let extractedData = null;
+    try {
+      extractedData = await profileExtractionService.extractProfile(profileUrl);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to extract profile data',
+        error: error.message
+      });
+    }
+
+    // Check if bio exists and contains verification code
+    const bio = extractedData?.profileData?.bio || '';
+    const verificationCode = verification.verificationCode;
+    
+    // Case-insensitive search for verification code in bio
+    const codeFound = bio.toLowerCase().includes(verificationCode.toLowerCase());
+
+    if (!codeFound) {
+      return res.status(400).json({
+        success: false,
+        message: 'Verification code not found in profile bio',
+        data: {
+          verified: false,
+          hint: `Please make sure you've added "${verificationCode}" to your profile bio/description.`
+        }
+      });
+    }
+
+    // Mark verification as verified
+    await verification.markAsVerified();
+
+    // Refresh verification to get updated verifiedAt
+    const updatedVerification = await ProfileVerification.findById(verification._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile verified successfully',
+      data: {
+        verified: true,
+        verifiedAt: updatedVerification.verifiedAt,
+        profileUrl
+      }
+    });
+  } catch (error) {
+    console.error('Verify profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to verify profile',
+      error: error.message
+    });
+  }
+};
+
+/**
  * Create seller profile from existing user account
  * POST /api/sellers/become-seller
  */
@@ -62,6 +277,19 @@ export const becomeSeller = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'User is already a seller'
+      });
+    }
+
+    // Check if profile is verified
+    const verifiedVerification = await ProfileVerification.findVerifiedVerification(userId, profileUrl);
+    if (!verifiedVerification) {
+      return res.status(403).json({
+        success: false,
+        message: 'Profile not verified. Please verify your profile first by adding the verification code to your bio.',
+        data: {
+          requiresVerification: true,
+          hint: 'Use POST /api/sellers/generate-verification-code to get a verification code, add it to your profile bio, then use POST /api/sellers/verify-profile to verify.'
+        }
       });
     }
 
