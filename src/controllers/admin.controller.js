@@ -790,3 +790,106 @@ export const getSystemHealth = async (req, res) => {
     });
   }
 };
+
+/**
+ * Make a user an admin
+ * PUT /api/admin/users/:id/make-admin
+ */
+export const makeUserAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if user is already an admin
+    if (user.role === 'admin') {
+      return res.status(400).json({
+        success: false,
+        message: 'User is already an admin'
+      });
+    }
+
+    // Update user role to admin and verify the account
+    user.role = 'admin';
+    user.verified = true; // Admin accounts should be verified
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'User promoted to admin successfully',
+      data: {
+        user: user.toJSON()
+      }
+    });
+  } catch (error) {
+    console.error('Make user admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to make user admin',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Remove admin status from a user
+ * PUT /api/admin/users/:id/remove-admin
+ */
+export const removeUserAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if user is an admin
+    if (user.role !== 'admin') {
+      return res.status(400).json({
+        success: false,
+        message: 'User is not an admin'
+      });
+    }
+
+    // Prevent admin from removing their own admin status
+    if (user._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot remove your own admin status'
+      });
+    }
+
+    // Check if user has associated sellers to determine new role
+    const sellerCount = await Seller.countDocuments({ userId: id });
+    const newRole = sellerCount > 0 ? 'seller' : 'user';
+
+    // Update user role
+    user.role = newRole;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Admin status removed successfully',
+      data: {
+        user: user.toJSON()
+      }
+    });
+  } catch (error) {
+    console.error('Remove user admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove admin status',
+      error: error.message
+    });
+  }
+};

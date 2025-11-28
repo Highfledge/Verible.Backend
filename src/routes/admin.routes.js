@@ -8,6 +8,8 @@ import {
   getUserDetails,
   updateUserStatus,
   deleteUser,
+  makeUserAdmin,
+  removeUserAdmin,
   getAllSellers,
   getSellerDetails,
   updateSellerStatus,
@@ -50,6 +52,9 @@ router.put('/users/:id/status', [
       .withMessage('Status must be either "active" or "suspended"'),
     updateUserStatus
   ]);
+
+router.put('/users/:id/make-admin', isAuthenticated, isAdmin, makeUserAdmin);
+router.put('/users/:id/remove-admin', isAuthenticated, isAdmin, removeUserAdmin);
 
 // Seller management routes
 router.get('/sellers', isAuthenticated, isAdmin, getAllSellers);
